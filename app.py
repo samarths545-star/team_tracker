@@ -13,7 +13,10 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 # Persistent DB (Render compatible)
-DB_PATH = os.environ.get("DB_PATH", "/data/database.db")
+if os.path.exists("/data"):
+    DB_PATH = "/data/database.db"
+else:
+    DB_PATH = "database.db"
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
