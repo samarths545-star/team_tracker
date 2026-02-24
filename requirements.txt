@@ -2,4 +2,4 @@ Flask
 Flask-Login
 pandas
 gunicorn
-matplotlib
+openpyxl

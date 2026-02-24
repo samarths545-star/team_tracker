@@ -1,16 +1,8 @@
-import matplotlib
-matplotlib.use("Agg")
-
 from flask import Flask, render_template, request, redirect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
-from datetime import datetime
 import os
-import re
-import matplotlib.pyplot as plt
-import io
-import base64
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -18,64 +10,65 @@ app.secret_key = "supersecretkey"
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-# =========================================================
-# DATABASE (FREE RENDER SAFE - LOCAL FILE)
-# =========================================================
+# =========================
+# DATABASE (FREE RENDER SAFE)
+# =========================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 
-# =========================================================
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS employee_kpi (
+            employee TEXT PRIMARY KEY,
+            No_of_cases INTEGER,
+            No_of_facilities_total INTEGER,
+            Records_expected INTEGER,
+            Records_received INTEGER,
+            Records_should_be_received INTEGER,
+            Correspondence_absence_of_death INTEGER,
+            Correspondence_facility_rejection INTEGER,
+            Records_if_all_docs_available INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =========================
 # USERS
-# =========================================================
+# =========================
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
     "Samarth": {"password": "Samarth1711", "role": "employee"}
 }
 
-EMPLOYEES = ["Kavish", "Chirag", "Sahil", "Tushar"]
-
-# =========================================================
-# INIT DATABASE
-# =========================================================
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS records (
-            employee TEXT,
-            date TEXT,
-            total_calls INTEGER,
-            total_minutes REAL,
-            total_faxes INTEGER,
-            fax_minutes REAL,
-            PRIMARY KEY (employee, date)
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =========================================================
+# =========================
 # SAFE DIVISION
-# =========================================================
+# =========================
 
 def safe_divide(n, d):
-    if d == 0 or d is None:
+    try:
+        return n / d if d not in [0, None] else 0
+    except:
         return 0
-    return n / d
+
+# =========================
+# NORMALIZATION
+# =========================
 
 def normalize(value, min_v, max_v):
     if max_v == min_v:
         return 1
     return (value - min_v) / (max_v - min_v)
 
-# =========================================================
+# =========================
 # PERFORMANCE ENGINE
-# =========================================================
+# =========================
 
 def calculate_employee_performance(emp, all_emps):
 
@@ -96,21 +89,46 @@ def calculate_employee_performance(emp, all_emps):
     facility_list = [safe_divide(e["Records_received"], e["No_of_facilities_total"]) for e in all_emps]
 
     norm_case = normalize(case_eff, min(case_list), max(case_list))
-    norm_fac = normalize(facility_yield, min(facility_list), max(facility_list))
+    norm_facility = normalize(facility_yield, min(facility_list), max(facility_list))
 
     final_score = (
         fulfillment * 0.30 +
         efficiency * 0.25 +
         documentation * 0.20 +
         norm_case * 0.15 +
-        norm_fac * 0.10
+        norm_facility * 0.10
     ) * 100
 
-    return round(final_score, 2)
+    return {
+        "Record_Fulfillment_Rate": round(fulfillment, 4),
+        "Efficiency_Rate": round(efficiency, 4),
+        "Documentation_Completion_Rate": round(documentation, 4),
+        "Case_Handling_Efficiency": round(case_eff, 4),
+        "Facility_Yield_Rate": round(facility_yield, 4),
+        "Final_Score": round(final_score, 2)
+    }
 
-# =========================================================
-# LOGIN SYSTEM
-# =========================================================
+def rank_employees(employee_list):
+
+    results = []
+
+    for emp in employee_list:
+        perf = calculate_employee_performance(emp, employee_list)
+        results.append({
+            "Employee": emp["employee"],
+            **perf
+        })
+
+    results.sort(key=lambda x: x["Final_Score"], reverse=True)
+
+    for i, r in enumerate(results):
+        r["Rank"] = i + 1
+
+    return results
+
+# =========================
+# LOGIN
+# =========================
 
 class User(UserMixin):
     def __init__(self, id, role):
@@ -123,16 +141,14 @@ def load_user(user_id):
         return User(user_id, USERS[user_id]["role"])
     return None
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        if username in USERS and USERS[username]["password"] == password:
-            login_user(User(username, USERS[username]["role"]))
-            return redirect("/dashboard" if USERS[username]["role"] == "attorney" else "/upload_page")
-
+        u = request.form["username"]
+        p = request.form["password"]
+        if u in USERS and USERS[u]["password"] == p:
+            login_user(User(u, USERS[u]["role"]))
+            return redirect("/dashboard" if USERS[u]["role"]=="attorney" else "/upload")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -141,106 +157,73 @@ def logout():
     logout_user()
     return redirect("/")
 
-# =========================================================
+# =========================
 # EMPLOYEE UPLOAD
-# =========================================================
+# =========================
 
-@app.route("/upload_page")
-@login_required
-def upload_page():
-    if current_user.role != "employee":
-        return redirect("/dashboard")
-    return render_template("upload.html", employees=EMPLOYEES)
-
-@app.route("/upload", methods=["POST"])
+@app.route("/upload", methods=["GET","POST"])
 @login_required
 def upload():
 
-    selected_employee = request.form.get("employee")
-    call_file = request.files.get("call_csv")
+    if current_user.role != "employee":
+        return redirect("/dashboard")
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    if request.method == "POST":
 
-    try:
-        calls = pd.read_csv(call_file)
-        calls = calls[calls["Action Result"] == "Call connected"]
-        calls["Duration"] = pd.to_timedelta(calls["Duration"])
-        calls["minutes"] = calls["Duration"].dt.total_seconds() / 60
+        file = request.files["file"]
+        df = pd.read_excel(file)
 
-        for date_value in calls["Date"].unique():
-            real_date = re.search(r'\d{2}/\d{2}/\d{4}', date_value).group()
-            formatted_date = datetime.strptime(real_date, "%m/%d/%Y").strftime("%Y-%m-%d")
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
 
-            day_calls = calls[calls["Date"] == date_value]
-            total_calls = len(day_calls)
-            total_minutes = day_calls["minutes"].sum()
+        for _, row in df.iterrows():
+            try:
+                c.execute("""
+                    INSERT OR REPLACE INTO employee_kpi
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    row["Employee"],
+                    row.get("No_of_cases",0),
+                    row.get("No_of_facilities_total",0),
+                    row.get("Records_expected",0),
+                    row.get("Records_received",0),
+                    row.get("Records_should_be_received",0),
+                    row.get("Correspondence_absence_of_death",0),
+                    row.get("Correspondence_facility_rejection",0),
+                    row.get("Records_if_all_docs_available",0)
+                ))
+            except Exception as e:
+                print("Row Error:", e)
 
-            total_faxes = total_calls
-            fax_minutes = total_faxes * 20
+        conn.commit()
+        conn.close()
 
-            c.execute("""
-                INSERT OR REPLACE INTO records
-                (employee, date, total_calls, total_minutes, total_faxes, fax_minutes)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (selected_employee, formatted_date, total_calls, total_minutes, total_faxes, fax_minutes))
+    return render_template("upload.html")
 
-    except Exception as e:
-        print("Upload Error:", e)
-
-    conn.commit()
-    conn.close()
-
-    return redirect("/upload_page")
-
-# =========================================================
+# =========================
 # DASHBOARD
-# =========================================================
+# =========================
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
 
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query("SELECT * FROM records", conn)
-        conn.close()
+    if current_user.role != "attorney":
+        return redirect("/upload")
 
-        if df.empty:
-            return render_template("dashboard.html", tables=[], graph=None)
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM employee_kpi", conn)
+    conn.close()
 
-        summary = df.groupby("employee").agg({
-            "total_calls": "sum",
-            "total_minutes": "sum",
-            "total_faxes": "sum",
-            "fax_minutes": "sum"
-        }).reset_index()
+    if df.empty:
+        return render_template("dashboard.html", tables=[])
 
-        results = []
+    employee_list = df.to_dict(orient="records")
 
-        for _, row in summary.iterrows():
-            results.append({
-                "employee": row["employee"],
-                "total_calls": row["total_calls"],
-                "total_minutes": row["total_minutes"],
-                "total_faxes": row["total_faxes"],
-                "fax_minutes": row["fax_minutes"],
-                "score": row["total_faxes"]  # simple scoring
-            })
+    ranked = rank_employees(employee_list)
 
-        # sort by score
-        results.sort(key=lambda x: x["score"], reverse=True)
+    return render_template("dashboard.html", tables=ranked)
 
-        # ranking
-        for i, r in enumerate(results):
-            r["rank"] = i + 1
-
-        return render_template("dashboard.html", tables=results, graph=None)
-
-    except Exception as e:
-        print("Dashboard Error:", e)
-        return render_template("dashboard.html", tables=[], graph=None)
-
-# =========================================================
+# =========================
 # RUN
-# =========================================================
+# =========================
