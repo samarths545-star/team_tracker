@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use("Agg")
+
 from flask import Flask, render_template, request, redirect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
