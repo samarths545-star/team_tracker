@@ -15,13 +15,12 @@ login_manager.init_app(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 
-# ================= DATABASE INIT =================
+# ================= DATABASE =================
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Performance history
     c.execute("""
         CREATE TABLE IF NOT EXISTS performance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +35,6 @@ def init_db():
         )
     """)
 
-    # Cases
     c.execute("""
         CREATE TABLE IF NOT EXISTS cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +43,6 @@ def init_db():
         )
     """)
 
-    # Defendants
     c.execute("""
         CREATE TABLE IF NOT EXISTS defendants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +61,11 @@ init_db()
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
-    "Samarth": {"password": "Samarth1711", "role": "employee"}
+    "Samarth": {"password": "Samarth1711", "role": "employee"},
+    "Kavish": {"password": "1234", "role": "employee"},
+    "Chirag": {"password": "1234", "role": "employee"},
+    "Sahil": {"password": "1234", "role": "employee"},
+    "Tushar": {"password": "1234", "role": "employee"}
 }
 
 class User(UserMixin):
@@ -132,8 +133,7 @@ def calculate_employee_performance(emp, all_emps):
         norm_facility * 0.10
     ) * 100
 
-    summons_bonus = get_summons_rate() * 10  # 10% impact
-
+    summons_bonus = get_summons_rate() * 10
     final_score = base_score + summons_bonus
 
     return {
@@ -160,7 +160,10 @@ def login():
         p = request.form["password"]
         if u in USERS and USERS[u]["password"] == p:
             login_user(User(u, USERS[u]["role"]))
-            return redirect("/dashboard")
+            if USERS[u]["role"] == "attorney":
+                return redirect("/attorney_dashboard")
+            else:
+                return redirect("/employee_dashboard")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -169,79 +172,86 @@ def logout():
     logout_user()
     return redirect("/")
 
-# ================= DASHBOARD =================
+# ================= EMPLOYEE DASHBOARD =================
 
-@app.route("/dashboard")
+@app.route("/employee_dashboard")
 @login_required
-def dashboard():
+def employee_dashboard():
+    if current_user.role != "employee":
+        return redirect("/attorney_dashboard")
+    return render_template("employee_dashboard.html")
+
+# ================= ATTORNEY DASHBOARD =================
+
+@app.route("/attorney_dashboard")
+@login_required
+def attorney_dashboard():
+    if current_user.role != "attorney":
+        return redirect("/employee_dashboard")
 
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM performance_history", conn)
     conn.close()
 
     if df.empty:
-        return render_template("dashboard.html", tables=[])
+        return render_template("attorney_dashboard.html", tables=[])
 
     grouped = df.groupby("employee").sum(numeric_only=True).reset_index()
     ranked = rank_employees(grouped.to_dict(orient="records"))
 
-    return render_template("dashboard.html",
+    return render_template("attorney_dashboard.html",
                            tables=ranked,
                            chart_data=json.dumps(ranked))
 
-# ================= CREATE CASE =================
+# ================= UPLOAD (EMPLOYEE ONLY) =================
 
-@app.route("/create_case", methods=["POST"])
+@app.route("/upload", methods=["POST"])
 @login_required
-def create_case():
+def upload():
+    if current_user.role != "employee":
+        return redirect("/attorney_dashboard")
 
-    case_name = request.form["case_name"]
-    facility = request.form["facility"]
-
-    suffix = "(TT)" if facility=="Temple Terrace" else "(FM)"
-    full_case_name = f"{case_name}{suffix}"
+    file = request.files["file"]
+    df = pd.read_excel(file)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    c.execute("INSERT INTO cases (case_name, facility) VALUES (?,?)",
-              (full_case_name, facility))
-    case_id = c.lastrowid
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    if facility == "Fort Myers":
-        defendants = """AMERICAN CONTRACT SYSTEMS, INC., a Foreign Corporation;
-O&M HALYARD, INC., a Foreign Corporation;
-ACCENDRA HEALTH, INC. F/K/A OWENS & MINOR, INC., a Foreign Corporation;
-CROCI REAL ESTATE, LLC, a Florida Limited Liability Company;
-LEESAR, INC., a Florida Corporation;
-PHILIP FLEISCHHACKER;
-ROBERT COOK;
-PENNY WALLS;"""
-    else:
-        defendants = """AMERICAN CONTRACT SYSTEMS, INC., a Foreign Corporation;
-O&M HALYARD, INC., a Foreign Corporation;
-ACCENDRA HEALTH, INC. F/K/A OWENS & MINOR, INC., a Foreign Corporation;
-BAYCARE HEALTH SYSTEM, INC., a Florida Non-Profit Corporation;
-BAYCARE INTEGRATED SERVICE CENTER, LLC, a Florida Limited Liability Company;
-PHILIP FLEISCHHACKER;
-SREAN LY;"""
-
-    for d in defendants.split(";"):
-        name = d.strip()
-        if name:
-            c.execute("INSERT INTO defendants (case_id, defendant_name) VALUES (?,?)",
-                      (case_id, name))
+    for _, row in df.iterrows():
+        c.execute("""
+            INSERT INTO performance_history (
+                employee, date,
+                No_of_cases, No_of_facilities_total,
+                Records_expected, Records_received,
+                Records_should_be_received,
+                Records_if_all_docs_available
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            current_user.id,
+            today,
+            row.get("No_of_cases",0),
+            row.get("No_of_facilities_total",0),
+            row.get("Records_expected",0),
+            row.get("Records_received",0),
+            row.get("Records_should_be_received",0),
+            row.get("Records_if_all_docs_available",0)
+        ))
 
     conn.commit()
     conn.close()
 
-    return redirect("/summons")
+    return redirect("/employee_dashboard")
 
 # ================= SUMMONS =================
 
 @app.route("/summons")
 @login_required
 def summons():
+    if current_user.role != "employee":
+        return redirect("/attorney_dashboard")
 
     conn = sqlite3.connect(DB_PATH)
     cases = pd.read_sql_query("SELECT * FROM cases", conn)
@@ -255,6 +265,8 @@ def summons():
 @app.route("/toggle_served/<int:def_id>")
 @login_required
 def toggle_served(def_id):
+    if current_user.role != "employee":
+        return redirect("/attorney_dashboard")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
