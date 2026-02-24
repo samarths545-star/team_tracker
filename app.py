@@ -1,10 +1,27 @@
-from flask import Flask, render_template, request, redirect
+# =========================
+# FULL PRODUCTION APP
+# =========================
+
+from flask import Flask, render_template, request, redirect, send_file
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
 from datetime import datetime, timedelta
-import re
 import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+import matplotlib.pyplot as plt
+import io
+import base64
+
+# =========================
+# APP CONFIG
+# =========================
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -12,8 +29,15 @@ app.secret_key = "supersecretkey"
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-# Persistent DB (Render compatible)
-DB_PATH = "database.db"
+DATA_DIR = "/data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+DB_PATH = os.path.join(DATA_DIR, "database.db")
+
+# =========================
+# USERS
+# =========================
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
@@ -22,26 +46,178 @@ USERS = {
 
 EMPLOYEES = ["Kavish", "Chirag", "Sahil", "Tushar"]
 
-# ---------------- DATABASE ----------------
+# =========================
+# DATABASE
+# =========================
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS records (
-                    employee TEXT,
-                    date TEXT,
-                    total_calls INTEGER,
-                    total_minutes REAL,
-                    total_faxes INTEGER,
-                    fax_minutes REAL,
-                    score REAL,
-                    PRIMARY KEY (employee, date)
-                )''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS records (
+            employee TEXT,
+            date TEXT,
+            records_expected INTEGER,
+            records_received INTEGER,
+            no_of_cases INTEGER,
+            no_of_facilities_total INTEGER,
+            records_should_be_received INTEGER,
+            records_if_all_docs_available INTEGER
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_db()
 
-# ---------------- LOGIN ----------------
+# =========================
+# SAFE DIVISION
+# =========================
+
+def safe_divide(n, d):
+    return n / d if d not in [0, None] else 0
+
+def normalize(value, min_v, max_v):
+    if max_v == min_v:
+        return 1
+    return (value - min_v) / (max_v - min_v)
+
+# =========================
+# PERFORMANCE ENGINE
+# =========================
+
+def calculate_scores(data):
+
+    rr = data["records_received"]
+    rexp = data["records_expected"]
+    rshould = data["records_should_be_received"]
+    rdocs = data["records_if_all_docs_available"]
+    cases = data["no_of_cases"]
+    facilities = data["no_of_facilities_total"]
+
+    fulfillment = safe_divide(rr, rshould)
+    efficiency = safe_divide(rr, rexp)
+    documentation = safe_divide(rr, rdocs)
+    case_eff = safe_divide(rr, cases)
+    facility_yield = safe_divide(rr, facilities)
+
+    return fulfillment, efficiency, documentation, case_eff, facility_yield
+
+def generate_ranking():
+
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM records", conn)
+    conn.close()
+
+    summary = df.groupby("employee").sum().reset_index()
+
+    employees = []
+
+    for _, row in summary.iterrows():
+
+        data = row.to_dict()
+
+        f, e, d, c, fy = calculate_scores(data)
+
+        employees.append({
+            "Employee": row["employee"],
+            "Fulfillment": f,
+            "Efficiency": e,
+            "Documentation": d,
+            "CaseEff": c,
+            "FacilityYield": fy
+        })
+
+    case_list = [x["CaseEff"] for x in employees]
+    facility_list = [x["FacilityYield"] for x in employees]
+
+    for emp in employees:
+        norm_case = normalize(emp["CaseEff"], min(case_list), max(case_list))
+        norm_fac = normalize(emp["FacilityYield"], min(facility_list), max(facility_list))
+
+        score = (
+            emp["Fulfillment"] * 0.30 +
+            emp["Efficiency"] * 0.25 +
+            emp["Documentation"] * 0.20 +
+            norm_case * 0.15 +
+            norm_fac * 0.10
+        ) * 100
+
+        emp["Score"] = round(score, 2)
+
+        if score >= 85:
+            emp["Category"] = "Excellent"
+        elif score >= 70:
+            emp["Category"] = "Good"
+        else:
+            emp["Category"] = "Needs Improvement"
+
+    employees.sort(key=lambda x: x["Score"], reverse=True)
+
+    for i, emp in enumerate(employees):
+        emp["Rank"] = i + 1
+
+    return employees
+
+# =========================
+# PDF GENERATION
+# =========================
+
+def generate_pdf_report(data):
+
+    file_path = "performance_report.pdf"
+    doc = SimpleDocTemplate(file_path, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph("<b>Monthly Performance Report</b>", styles["Heading1"]))
+    elements.append(Spacer(1, 20))
+
+    for emp in data:
+        text = f"""
+        <b>{emp['Employee']}</b><br/>
+        Score: {emp['Score']}<br/>
+        Rank: {emp['Rank']}<br/>
+        Category: {emp['Category']}<br/><br/>
+        """
+        elements.append(Paragraph(text, styles["Normal"]))
+        elements.append(Spacer(1, 12))
+
+    doc.build(elements)
+    return file_path
+
+# =========================
+# EMAIL AUTOMATION
+# =========================
+
+def send_email_report(data):
+
+    sender = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASS")
+    receiver = "attorney@email.com"
+
+    message = MIMEMultipart()
+    message["From"] = sender
+    message["To"] = receiver
+    message["Subject"] = "Monthly Performance Report"
+
+    body = "Performance Summary:\n\n"
+
+    for emp in data:
+        body += f"{emp['Employee']} - Score: {emp['Score']} - Rank: {emp['Rank']}\n"
+
+    message.attach(MIMEText(body, "plain"))
+
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(sender, password)
+    server.sendmail(sender, receiver, message.as_string())
+    server.quit()
+
+# =========================
+# LOGIN SYSTEM
+# =========================
+
 class User(UserMixin):
     def __init__(self, id, role):
         self.id = id
@@ -61,10 +237,7 @@ def login():
 
         if username in USERS and USERS[username]["password"] == password:
             login_user(User(username, USERS[username]["role"]))
-            if USERS[username]["role"] == "employee":
-                return redirect("/upload_page")
-            else:
-                return redirect("/dashboard")
+            return redirect("/dashboard" if USERS[username]["role"] == "attorney" else "/upload")
 
     return render_template("login.html")
 
@@ -74,130 +247,61 @@ def logout():
     logout_user()
     return redirect("/")
 
-# ---------------- EMPLOYEE PAGE ----------------
-@app.route("/upload_page")
-@login_required
-def upload_page():
-    if current_user.role != "employee":
-        return redirect("/dashboard")
-    return render_template("upload.html", employees=EMPLOYEES)
+# =========================
+# DASHBOARD
+# =========================
 
-# ---------------- UPLOAD LOGIC ----------------
-@app.route("/upload", methods=["POST"])
-@login_required
-def upload():
-
-    if current_user.role != "employee":
-        return redirect("/dashboard")
-
-    selected_employee = request.form.get("employee")
-    call_file = request.files.get("call_csv")
-    fax_file = request.files.get("fax_csv")
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    # CALL CSV
-    try:
-        calls = pd.read_csv(call_file)
-        calls = calls[calls["Action Result"] == "Call connected"]
-        calls["Duration"] = pd.to_timedelta(calls["Duration"])
-        calls["minutes"] = calls["Duration"].dt.total_seconds() / 60
-
-        for date_value in calls["Date"].unique():
-            real_date = re.search(r'\d{2}/\d{2}/\d{4}', date_value).group()
-            formatted_date = datetime.strptime(real_date, "%m/%d/%Y").strftime("%Y-%m-%d")
-
-            day_calls = calls[calls["Date"] == date_value]
-            total_calls = len(day_calls)
-            total_minutes = day_calls["minutes"].sum()
-
-            c.execute("""
-                INSERT OR REPLACE INTO records
-                (employee, date, total_calls, total_minutes, total_faxes, fax_minutes, score)
-                VALUES (?, ?, ?, ?, 0, 0, 0)
-            """, (selected_employee, formatted_date, total_calls, total_minutes))
-
-    except Exception as e:
-        print("Call Error:", e)
-
-    # FAX CSV
-    try:
-        faxes = pd.read_csv(fax_file)
-
-        for date_value in faxes["Date"].unique():
-            real_date = re.search(r'\d{2}/\d{2}/\d{4}', date_value).group()
-            formatted_date = datetime.strptime(real_date, "%m/%d/%Y").strftime("%Y-%m-%d")
-
-            day_faxes = faxes[faxes["Date"] == date_value]
-            total_faxes = len(day_faxes)
-            fax_minutes = total_faxes * 20
-            score = fax_minutes
-
-            c.execute("""
-                UPDATE records
-                SET total_faxes=?, fax_minutes=?, score=?
-                WHERE employee=? AND date=?
-            """, (total_faxes, fax_minutes, score, selected_employee, formatted_date))
-
-    except Exception as e:
-        print("Fax Error:", e)
-
-    conn.commit()
-    conn.close()
-
-    return redirect("/upload_page")
-
-# ---------------- ATTORNEY DASHBOARD ----------------
 @app.route("/dashboard")
 @login_required
 def dashboard():
 
     if current_user.role != "attorney":
-        return redirect("/upload_page")
+        return redirect("/upload")
 
-    period = request.args.get("period")
-    selected_date = request.args.get("date")
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
+    ranking = generate_ranking()
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM records", conn)
-    conn.close()
+    # Trend graph
+    names = [x["Employee"] for x in ranking]
+    scores = [x["Score"] for x in ranking]
 
-    if df.empty:
-        return render_template("dashboard.html", tables=[], labels=[], scores=[])
+    plt.figure()
+    plt.bar(names, scores)
+    plt.title("Performance Ranking")
+    plt.ylabel("Score")
 
-    df["date"] = pd.to_datetime(df["date"])
+    img = io.BytesIO()
+    plt.savefig(img, format='png')
+    img.seek(0)
+    graph_url = base64.b64encode(img.getvalue()).decode()
 
-    # Specific Date
-    if selected_date:
-        df = df[df["date"] == pd.to_datetime(selected_date)]
+    return render_template("dashboard.html", data=ranking, graph=graph_url)
 
-    # Date Range
-    elif start_date and end_date:
-        df = df[(df["date"] >= pd.to_datetime(start_date)) &
-                (df["date"] <= pd.to_datetime(end_date))]
+# =========================
+# PDF ROUTE
+# =========================
 
-    # Period Filter
-    elif period:
-        cutoff = datetime.now() - timedelta(days=int(period))
-        df = df[df["date"] >= cutoff]
+@app.route("/download_pdf")
+@login_required
+def download_pdf():
 
-    summary = df.groupby("employee").agg({
-        "total_calls": "sum",
-        "total_minutes": "sum",
-        "total_faxes": "sum",
-        "fax_minutes": "sum",
-        "score": "sum"
-    }).reset_index()
+    ranking = generate_ranking()
+    file_path = generate_pdf_report(ranking)
+    return send_file(file_path, as_attachment=True)
 
-    summary = summary.sort_values(by="score", ascending=False)
+# =========================
+# EMAIL ROUTE
+# =========================
 
-    labels = summary["employee"].tolist()
-    scores = summary["score"].tolist()
+@app.route("/send_email")
+@login_required
+def email_report():
+    ranking = generate_ranking()
+    send_email_report(ranking)
+    return redirect("/dashboard")
 
-    return render_template("dashboard.html",
-                           tables=summary.to_dict(orient="records"),
-                           labels=labels,
-                           scores=scores)
+# =========================
+# RUN
+# =========================
+
+if __name__ == "__main__":
+    app.run()
