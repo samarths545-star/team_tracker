@@ -1,8 +1,10 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, jsonify
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
 import os
+import json
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -10,65 +12,96 @@ app.secret_key = "supersecretkey"
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-# =========================
-# DATABASE (FREE RENDER SAFE)
-# =========================
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
+
+# ================= DATABASE INIT =================
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+
+    # Performance history
     c.execute("""
-        CREATE TABLE IF NOT EXISTS employee_kpi (
-            employee TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS performance_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee TEXT,
+            date TEXT,
             No_of_cases INTEGER,
             No_of_facilities_total INTEGER,
             Records_expected INTEGER,
             Records_received INTEGER,
             Records_should_be_received INTEGER,
-            Correspondence_absence_of_death INTEGER,
-            Correspondence_facility_rejection INTEGER,
             Records_if_all_docs_available INTEGER
         )
     """)
+
+    # Cases
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_name TEXT,
+            facility TEXT
+        )
+    """)
+
+    # Defendants
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS defendants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER,
+            defendant_name TEXT,
+            served INTEGER DEFAULT 0
+        )
+    """)
+
     conn.commit()
     conn.close()
 
 init_db()
 
-# =========================
-# USERS
-# =========================
+# ================= USERS =================
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
     "Samarth": {"password": "Samarth1711", "role": "employee"}
 }
 
-# =========================
-# SAFE DIVISION
-# =========================
+class User(UserMixin):
+    def __init__(self, id, role):
+        self.id = id
+        self.role = role
+
+@login_manager.user_loader
+def load_user(user_id):
+    if user_id in USERS:
+        return User(user_id, USERS[user_id]["role"])
+    return None
+
+# ================= HELPERS =================
 
 def safe_divide(n, d):
     try:
-        return n / d if d not in [0, None] else 0
+        return float(n) / float(d) if d and float(d) != 0 else 0.0
     except:
-        return 0
-
-# =========================
-# NORMALIZATION
-# =========================
+        return 0.0
 
 def normalize(value, min_v, max_v):
     if max_v == min_v:
         return 1
     return (value - min_v) / (max_v - min_v)
 
-# =========================
-# PERFORMANCE ENGINE
-# =========================
+def get_summons_rate():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM defendants")
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM defendants WHERE served=1")
+    served = c.fetchone()[0]
+    conn.close()
+    return safe_divide(served, total)
+
+# ================= PERFORMANCE =================
 
 def calculate_employee_performance(emp, all_emps):
 
@@ -91,7 +124,7 @@ def calculate_employee_performance(emp, all_emps):
     norm_case = normalize(case_eff, min(case_list), max(case_list))
     norm_facility = normalize(facility_yield, min(facility_list), max(facility_list))
 
-    final_score = (
+    base_score = (
         fulfillment * 0.30 +
         efficiency * 0.25 +
         documentation * 0.20 +
@@ -99,47 +132,26 @@ def calculate_employee_performance(emp, all_emps):
         norm_facility * 0.10
     ) * 100
 
+    summons_bonus = get_summons_rate() * 10  # 10% impact
+
+    final_score = base_score + summons_bonus
+
     return {
-        "Record_Fulfillment_Rate": round(fulfillment, 4),
-        "Efficiency_Rate": round(efficiency, 4),
-        "Documentation_Completion_Rate": round(documentation, 4),
-        "Case_Handling_Efficiency": round(case_eff, 4),
-        "Facility_Yield_Rate": round(facility_yield, 4),
-        "Final_Score": round(final_score, 2)
+        "Employee": emp["employee"],
+        "Final_Score": round(final_score,2),
+        "Summons_Rate": round(get_summons_rate()*100,1)
     }
 
 def rank_employees(employee_list):
-
     results = []
-
     for emp in employee_list:
-        perf = calculate_employee_performance(emp, employee_list)
-        results.append({
-            "Employee": emp["employee"],
-            **perf
-        })
-
+        results.append(calculate_employee_performance(emp, employee_list))
     results.sort(key=lambda x: x["Final_Score"], reverse=True)
-
     for i, r in enumerate(results):
         r["Rank"] = i + 1
-
     return results
 
-# =========================
-# LOGIN
-# =========================
-
-class User(UserMixin):
-    def __init__(self, id, role):
-        self.id = id
-        self.role = role
-
-@login_manager.user_loader
-def load_user(user_id):
-    if user_id in USERS:
-        return User(user_id, USERS[user_id]["role"])
-    return None
+# ================= LOGIN =================
 
 @app.route("/", methods=["GET","POST"])
 def login():
@@ -148,7 +160,7 @@ def login():
         p = request.form["password"]
         if u in USERS and USERS[u]["password"] == p:
             login_user(User(u, USERS[u]["role"]))
-            return redirect("/dashboard" if USERS[u]["role"]=="attorney" else "/upload")
+            return redirect("/dashboard")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -157,73 +169,100 @@ def logout():
     logout_user()
     return redirect("/")
 
-# =========================
-# EMPLOYEE UPLOAD
-# =========================
-
-@app.route("/upload", methods=["GET","POST"])
-@login_required
-def upload():
-
-    if current_user.role != "employee":
-        return redirect("/dashboard")
-
-    if request.method == "POST":
-
-        file = request.files["file"]
-        df = pd.read_excel(file)
-
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-
-        for _, row in df.iterrows():
-            try:
-                c.execute("""
-                    INSERT OR REPLACE INTO employee_kpi
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    row["Employee"],
-                    row.get("No_of_cases",0),
-                    row.get("No_of_facilities_total",0),
-                    row.get("Records_expected",0),
-                    row.get("Records_received",0),
-                    row.get("Records_should_be_received",0),
-                    row.get("Correspondence_absence_of_death",0),
-                    row.get("Correspondence_facility_rejection",0),
-                    row.get("Records_if_all_docs_available",0)
-                ))
-            except Exception as e:
-                print("Row Error:", e)
-
-        conn.commit()
-        conn.close()
-
-    return render_template("upload.html")
-
-# =========================
-# DASHBOARD
-# =========================
+# ================= DASHBOARD =================
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
 
-    if current_user.role != "attorney":
-        return redirect("/upload")
-
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM employee_kpi", conn)
+    df = pd.read_sql_query("SELECT * FROM performance_history", conn)
     conn.close()
 
     if df.empty:
         return render_template("dashboard.html", tables=[])
 
-    employee_list = df.to_dict(orient="records")
+    grouped = df.groupby("employee").sum(numeric_only=True).reset_index()
+    ranked = rank_employees(grouped.to_dict(orient="records"))
 
-    ranked = rank_employees(employee_list)
+    return render_template("dashboard.html",
+                           tables=ranked,
+                           chart_data=json.dumps(ranked))
 
-    return render_template("dashboard.html", tables=ranked)
+# ================= CREATE CASE =================
 
-# =========================
-# RUN
-# =========================
+@app.route("/create_case", methods=["POST"])
+@login_required
+def create_case():
+
+    case_name = request.form["case_name"]
+    facility = request.form["facility"]
+
+    suffix = "(TT)" if facility=="Temple Terrace" else "(FM)"
+    full_case_name = f"{case_name}{suffix}"
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("INSERT INTO cases (case_name, facility) VALUES (?,?)",
+              (full_case_name, facility))
+    case_id = c.lastrowid
+
+    if facility == "Fort Myers":
+        defendants = """AMERICAN CONTRACT SYSTEMS, INC., a Foreign Corporation;
+O&M HALYARD, INC., a Foreign Corporation;
+ACCENDRA HEALTH, INC. F/K/A OWENS & MINOR, INC., a Foreign Corporation;
+CROCI REAL ESTATE, LLC, a Florida Limited Liability Company;
+LEESAR, INC., a Florida Corporation;
+PHILIP FLEISCHHACKER;
+ROBERT COOK;
+PENNY WALLS;"""
+    else:
+        defendants = """AMERICAN CONTRACT SYSTEMS, INC., a Foreign Corporation;
+O&M HALYARD, INC., a Foreign Corporation;
+ACCENDRA HEALTH, INC. F/K/A OWENS & MINOR, INC., a Foreign Corporation;
+BAYCARE HEALTH SYSTEM, INC., a Florida Non-Profit Corporation;
+BAYCARE INTEGRATED SERVICE CENTER, LLC, a Florida Limited Liability Company;
+PHILIP FLEISCHHACKER;
+SREAN LY;"""
+
+    for d in defendants.split(";"):
+        name = d.strip()
+        if name:
+            c.execute("INSERT INTO defendants (case_id, defendant_name) VALUES (?,?)",
+                      (case_id, name))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/summons")
+
+# ================= SUMMONS =================
+
+@app.route("/summons")
+@login_required
+def summons():
+
+    conn = sqlite3.connect(DB_PATH)
+    cases = pd.read_sql_query("SELECT * FROM cases", conn)
+    defendants = pd.read_sql_query("SELECT * FROM defendants", conn)
+    conn.close()
+
+    return render_template("summons.html",
+                           cases=cases.to_dict(orient="records"),
+                           defendants=defendants.to_dict(orient="records"))
+
+@app.route("/toggle_served/<int:def_id>")
+@login_required
+def toggle_served(def_id):
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE defendants SET served = CASE WHEN served=1 THEN 0 ELSE 1 END WHERE id=?",(def_id,))
+    conn.commit()
+    conn.close()
+
+    return redirect("/summons")
+
+if __name__ == "__main__":
+    app.run(debug=True)

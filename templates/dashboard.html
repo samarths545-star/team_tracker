@@ -5,83 +5,62 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="bg-light">
 
-<div class="container mt-5">
-<h2 class="text-center">Master Performance Dashboard</h2>
+<body>
 
-<!-- PERIOD FILTER -->
-<div class="text-center mb-3">
-<a href="/dashboard?period=7" class="btn btn-outline-primary">7 Days</a>
-<a href="/dashboard?period=30" class="btn btn-outline-primary">30 Days</a>
-<a href="/dashboard?period=90" class="btn btn-outline-primary">90 Days</a>
-<a href="/dashboard?period=120" class="btn btn-outline-primary">120 Days</a>
-<a href="/dashboard" class="btn btn-dark">All Time</a>
+<div class="d-flex">
+
+<!-- SIDEBAR -->
+<div class="bg-dark text-white p-3" style="width:250px; min-height:100vh;">
+<h4>Employee Panel</h4>
+<hr>
+<a href="/dashboard" class="btn btn-outline-light w-100 mb-2">Performance</a>
+<a href="/upload" class="btn btn-outline-light w-100 mb-2">Upload Data</a>
+<a href="/summons" class="btn btn-outline-light w-100 mb-2">Summons</a>
+<a href="/logout" class="btn btn-danger w-100 mt-3">Logout</a>
 </div>
 
-<!-- SPECIFIC DATE -->
-<div class="text-center mb-3">
-<form method="GET" action="/dashboard">
-<input type="date" name="date" required>
-<button class="btn btn-success">View Specific Date</button>
-</form>
-</div>
+<!-- MAIN -->
+<div class="container mt-4">
 
-<!-- DATE RANGE -->
-<div class="text-center mb-4">
-<form method="GET" action="/dashboard">
-<input type="date" name="start_date" required>
-<input type="date" name="end_date" required>
-<button class="btn btn-warning">View Date Range</button>
-</form>
-</div>
+<h2>Performance Ranking</h2>
 
-<table class="table table-striped">
-<thead class="table-dark">
-<tr>
+<table class="table table-bordered text-center">
+<tr class="table-dark">
 <th>Rank</th>
 <th>Employee</th>
-<th>Calls</th>
-<th>Call Minutes</th>
-<th>Faxes</th>
-<th>Fax Minutes</th>
-<th>Score</th>
+<th>Final Score</th>
+<th>Summons Rate (%)</th>
 </tr>
-</thead>
-<tbody>
+
 {% for row in tables %}
 <tr>
-<td>{{ loop.index }}</td>
-<td>{{ row.employee }}</td>
-<td>{{ row.total_calls }}</td>
-<td>{{ row.total_minutes | round(2) }}</td>
-<td>{{ row.total_faxes }}</td>
-<td>{{ row.fax_minutes }}</td>
-<td>{{ row.score }}</td>
+<td>{{ row.Rank }}</td>
+<td>{{ row.Employee }}</td>
+<td>{{ row.Final_Score }}</td>
+<td>{{ row.Summons_Rate }}</td>
 </tr>
 {% endfor %}
-</tbody>
 </table>
 
 <canvas id="chart"></canvas>
 
 <script>
-const labels = {{ labels | safe }};
-const scores = {{ scores | safe }};
+const data = {{ chart_data|safe }};
+const labels = data.map(e => e.Employee);
+const scores = data.map(e => e.Final_Score);
 
 new Chart(document.getElementById('chart'), {
-    type: 'bar',
-    data: {
-        labels: labels,
-        datasets: [{
-            label: 'Performance Score',
-            data: scores
-        }]
-    }
+type: 'bar',
+data: {
+labels: labels,
+datasets: [{ label: 'Score', data: scores }]
+},
+options: { scales: { y: { beginAtZero: true, max: 110 } } }
 });
 </script>
 
-<a href="/logout" class="btn btn-danger mt-3">Logout</a>
+</div>
 </div>
 
 </body>
