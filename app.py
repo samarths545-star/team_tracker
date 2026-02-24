@@ -30,8 +30,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 DATA_DIR = "/data"
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
+DB_PATH = os.path.join(DATA_DIR, "database.db")
 
 DB_PATH = os.path.join(DATA_DIR, "database.db")
 
