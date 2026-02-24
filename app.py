@@ -2,9 +2,12 @@ from flask import Flask, render_template, request, redirect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import re
+import matplotlib.pyplot as plt
+import io
+import base64
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -13,15 +16,11 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 # =========================================================
-# DATABASE (Render Persistent Disk)
+# DATABASE (FREE RENDER SAFE - LOCAL FILE)
 # =========================================================
 
-DATA_DIR = "/data"
-
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
-
-DB_PATH = os.path.join(DATA_DIR, "database.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "database.db")
 
 # =========================================================
 # USERS
@@ -49,7 +48,6 @@ def init_db():
             total_minutes REAL,
             total_faxes INTEGER,
             fax_minutes REAL,
-            score REAL,
             PRIMARY KEY (employee, date)
         )
     ''')
@@ -67,10 +65,6 @@ def safe_divide(n, d):
         return 0
     return n / d
 
-# =========================================================
-# NORMALIZATION
-# =========================================================
-
 def normalize(value, min_v, max_v):
     if max_v == min_v:
         return 1
@@ -82,63 +76,34 @@ def normalize(value, min_v, max_v):
 
 def calculate_employee_performance(emp, all_emps):
 
-    rr = emp.get("Records_received", 0)
-    rexp = emp.get("Records_expected", 0)
-    rshould = emp.get("Records_should_be_received", 0)
-    rdocs = emp.get("Records_if_all_docs_available", 0)
-    cases = emp.get("No_of_cases", 0)
-    facilities = emp.get("No_of_facilities_total", 0)
+    rr = emp["Records_received"]
+    rexp = emp["Records_expected"]
+    rshould = emp["Records_should_be_received"]
+    rdocs = emp["Records_if_all_docs_available"]
+    cases = emp["No_of_cases"]
+    facilities = emp["No_of_facilities_total"]
 
-    # Raw KPIs
     fulfillment = safe_divide(rr, rshould)
     efficiency = safe_divide(rr, rexp)
     documentation = safe_divide(rr, rdocs)
     case_eff = safe_divide(rr, cases)
     facility_yield = safe_divide(rr, facilities)
 
-    # Normalization
-    case_list = [safe_divide(e.get("Records_received", 0), e.get("No_of_cases", 0)) for e in all_emps]
-    facility_list = [safe_divide(e.get("Records_received", 0), e.get("No_of_facilities_total", 0)) for e in all_emps]
+    case_list = [safe_divide(e["Records_received"], e["No_of_cases"]) for e in all_emps]
+    facility_list = [safe_divide(e["Records_received"], e["No_of_facilities_total"]) for e in all_emps]
 
     norm_case = normalize(case_eff, min(case_list), max(case_list))
-    norm_facility = normalize(facility_yield, min(facility_list), max(facility_list))
+    norm_fac = normalize(facility_yield, min(facility_list), max(facility_list))
 
     final_score = (
         fulfillment * 0.30 +
         efficiency * 0.25 +
         documentation * 0.20 +
         norm_case * 0.15 +
-        norm_facility * 0.10
+        norm_fac * 0.10
     ) * 100
 
-    return {
-        "Record_Fulfillment_Rate": round(fulfillment, 4),
-        "Efficiency_Rate": round(efficiency, 4),
-        "Documentation_Completion_Rate": round(documentation, 4),
-        "Case_Handling_Efficiency": round(case_eff, 4),
-        "Facility_Yield_Rate": round(facility_yield, 4),
-        "Normalized_Case": round(norm_case, 4),
-        "Normalized_Facility": round(norm_facility, 4),
-        "Final_Score": round(final_score, 2)
-    }
-
-def rank_employees(employee_data):
-
-    results = []
-
-    for emp in employee_data:
-        performance = calculate_employee_performance(emp, employee_data)
-        results.append({
-            "Employee": emp.get("Employee"),
-            **performance
-        })
-
-    results.sort(key=lambda x: x["Final_Score"], reverse=True)
-
-    for i, emp in enumerate(results):
-        emp["Rank"] = i + 1
-
-    return results
+    return round(final_score, 2)
 
 # =========================================================
 # LOGIN SYSTEM
@@ -190,7 +155,6 @@ def upload():
 
     selected_employee = request.form.get("employee")
     call_file = request.files.get("call_csv")
-    fax_file = request.files.get("fax_csv")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -209,11 +173,14 @@ def upload():
             total_calls = len(day_calls)
             total_minutes = day_calls["minutes"].sum()
 
+            total_faxes = total_calls
+            fax_minutes = total_faxes * 20
+
             c.execute("""
                 INSERT OR REPLACE INTO records
-                (employee, date, total_calls, total_minutes, total_faxes, fax_minutes, score)
-                VALUES (?, ?, ?, ?, 0, 0, 0)
-            """, (selected_employee, formatted_date, total_calls, total_minutes))
+                (employee, date, total_calls, total_minutes, total_faxes, fax_minutes)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (selected_employee, formatted_date, total_calls, total_minutes, total_faxes, fax_minutes))
 
     except Exception as e:
         print("Upload Error:", e)
@@ -236,21 +203,16 @@ def dashboard():
     conn.close()
 
     if df.empty:
-        return render_template("dashboard.html", tables=[])
+        return render_template("dashboard.html", tables=[], graph=None)
 
-    summary = df.groupby("employee").agg({
-        "total_calls": "sum",
-        "total_minutes": "sum",
-        "total_faxes": "sum",
-        "fax_minutes": "sum"
-    }).reset_index()
+    summary = df.groupby("employee").sum().reset_index()
 
     employee_data = []
 
     for _, row in summary.iterrows():
         employee_data.append({
             "Employee": row["employee"],
-            "No_of_cases": row["total_calls"],  # example mapping
+            "No_of_cases": row["total_calls"],
             "No_of_facilities_total": row["total_calls"],
             "Records_expected": row["total_calls"],
             "Records_received": row["total_faxes"],
@@ -258,9 +220,35 @@ def dashboard():
             "Records_if_all_docs_available": row["total_calls"]
         })
 
-    ranked = rank_employees(employee_data)
+    results = []
 
-    return render_template("dashboard.html", tables=ranked)
+    for emp in employee_data:
+        score = calculate_employee_performance(emp, employee_data)
+        results.append({
+            "Employee": emp["Employee"],
+            "Score": score
+        })
+
+    results.sort(key=lambda x: x["Score"], reverse=True)
+
+    for i, r in enumerate(results):
+        r["Rank"] = i + 1
+
+    # Generate bar chart
+    names = [r["Employee"] for r in results]
+    scores = [r["Score"] for r in results]
+
+    plt.figure()
+    plt.bar(names, scores)
+    plt.ylabel("Score")
+    plt.title("Employee Performance Ranking")
+
+    img = io.BytesIO()
+    plt.savefig(img, format="png")
+    img.seek(0)
+    graph_url = base64.b64encode(img.getvalue()).decode()
+
+    return render_template("dashboard.html", tables=results, graph=graph_url)
 
 # =========================================================
 # RUN

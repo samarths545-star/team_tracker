@@ -3,4 +3,3 @@ Flask-Login
 pandas
 gunicorn
 matplotlib
-reportlab
