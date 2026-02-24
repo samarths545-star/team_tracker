@@ -201,57 +201,45 @@ def upload():
 @login_required
 def dashboard():
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM records", conn)
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql_query("SELECT * FROM records", conn)
+        conn.close()
 
-    if df.empty:
+        if df.empty:
+            return render_template("dashboard.html", tables=[], graph=None)
+
+        summary = df.groupby("employee").agg({
+            "total_calls": "sum",
+            "total_minutes": "sum",
+            "total_faxes": "sum",
+            "fax_minutes": "sum"
+        }).reset_index()
+
+        results = []
+
+        for _, row in summary.iterrows():
+            results.append({
+                "employee": row["employee"],
+                "total_calls": row["total_calls"],
+                "total_minutes": row["total_minutes"],
+                "total_faxes": row["total_faxes"],
+                "fax_minutes": row["fax_minutes"],
+                "score": row["total_faxes"]  # simple scoring
+            })
+
+        # sort by score
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        # ranking
+        for i, r in enumerate(results):
+            r["rank"] = i + 1
+
+        return render_template("dashboard.html", tables=results, graph=None)
+
+    except Exception as e:
+        print("Dashboard Error:", e)
         return render_template("dashboard.html", tables=[], graph=None)
-
-    summary = df.groupby("employee").sum().reset_index()
-
-    employee_data = []
-
-    for _, row in summary.iterrows():
-        employee_data.append({
-            "Employee": row["employee"],
-            "No_of_cases": row["total_calls"],
-            "No_of_facilities_total": row["total_calls"],
-            "Records_expected": row["total_calls"],
-            "Records_received": row["total_faxes"],
-            "Records_should_be_received": row["total_calls"],
-            "Records_if_all_docs_available": row["total_calls"]
-        })
-
-    results = []
-
-    for emp in employee_data:
-        score = calculate_employee_performance(emp, employee_data)
-        results.append({
-            "Employee": emp["Employee"],
-            "Score": score
-        })
-
-    results.sort(key=lambda x: x["Score"], reverse=True)
-
-    for i, r in enumerate(results):
-        r["Rank"] = i + 1
-
-    # Generate bar chart
-    names = [r["Employee"] for r in results]
-    scores = [r["Score"] for r in results]
-
-    plt.figure()
-    plt.bar(names, scores)
-    plt.ylabel("Score")
-    plt.title("Employee Performance Ranking")
-
-    img = io.BytesIO()
-    plt.savefig(img, format="png")
-    img.seek(0)
-    graph_url = base64.b64encode(img.getvalue()).decode()
-
-    return render_template("dashboard.html", tables=results, graph=graph_url)
 
 # =========================================================
 # RUN
