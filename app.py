@@ -31,13 +31,15 @@ def init_db():
         call_minutes REAL DEFAULT 0,
         total_faxes INTEGER DEFAULT 0,
         fax_minutes REAL DEFAULT 0,
-        records_received INTEGER DEFAULT 0,
-        records_requested INTEGER DEFAULT 0,
-        correspondence_received INTEGER DEFAULT 0,
         cases INTEGER DEFAULT 0,
-        facilities INTEGER DEFAULT 0,
-        summons_efile_count INTEGER DEFAULT 0,
-        summons_served_count INTEGER DEFAULT 0
+        facilities_total INTEGER DEFAULT 0,
+        records_received INTEGER DEFAULT 0,
+        correspondence_received INTEGER DEFAULT 0,
+        expected_records INTEGER DEFAULT 0,
+        barring_rejection INTEGER DEFAULT 0,
+        records_if_all_docs INTEGER DEFAULT 0,
+        summons_efile INTEGER DEFAULT 0,
+        summons_served INTEGER DEFAULT 0
     )
     """)
 
@@ -85,25 +87,39 @@ def logout():
     logout_user()
     return redirect("/")
 
+# ================= HELPER =================
+
+def insert_record(employee, **kwargs):
+    conn = sqlite3.connect(DB_PATH)
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    columns = ", ".join(["employee","date"] + list(kwargs.keys()))
+    placeholders = ", ".join(["?"]*(2+len(kwargs)))
+    values = [employee,today] + list(kwargs.values())
+
+    conn.execute(f"INSERT INTO analytics ({columns}) VALUES ({placeholders})",values)
+    conn.commit()
+    conn.close()
+
 # ================= DASHBOARD =================
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
 
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
+    start = request.args.get("start_date")
+    end = request.args.get("end_date")
 
     conn = sqlite3.connect(DB_PATH)
 
     query = "SELECT * FROM analytics"
     params = []
 
-    if start_date and end_date:
+    if start and end:
         query += " WHERE date BETWEEN ? AND ?"
-        params = [start_date, end_date]
+        params = [start,end]
 
-    df = pd.read_sql_query(query, conn, params=params)
+    df = pd.read_sql_query(query,conn,params=params)
     conn.close()
 
     if df.empty:
@@ -114,130 +130,106 @@ def dashboard():
 
     df = df.groupby("employee").sum(numeric_only=True).reset_index()
 
-    # Performance Score Formula
+    # ================= KPIs =================
+
+    df["call_efficiency"] = df["connected_calls"] / df["total_calls"].replace(0,1)
+    df["communication_time"] = df["call_minutes"] + df["fax_minutes"]
+    df["record_fulfillment"] = df["records_received"] / df["expected_records"].replace(0,1)
+    df["doc_completion"] = df["records_received"] / df["records_if_all_docs"].replace(0,1)
+    df["summons_effectiveness"] = df["summons_served"] / df["summons_efile"].replace(0,1)
+
     df["score"] = (
-        df["connected_calls"] * 2 +
-        df["call_minutes"]/10 +
-        df["total_faxes"] * 3 +
-        df["records_received"] * 2 +
-        df["correspondence_received"] * 1.5 +
-        df["summons_efile_count"] * 2 +
-        df["summons_served_count"] * 3
+        df["call_efficiency"] * 25 +
+        df["communication_time"] * 0.1 +
+        df["record_fulfillment"] * 25 +
+        df["doc_completion"] * 15 +
+        df["summons_effectiveness"] * 20
     )
 
-    df = df.sort_values("score", ascending=False)
-    df["Rank"] = range(1, len(df)+1)
-
-    data = df.to_dict(orient="records")
+    df = df.sort_values("score",ascending=False)
+    df["Rank"] = range(1,len(df)+1)
 
     return render_template("master_dashboard.html",
                            employees=EMPLOYEES,
-                           data=data,
+                           data=df.to_dict(orient="records"),
                            user=current_user.display)
-
-# ================= SAFE INSERT =================
-
-def insert_data(employee, **kwargs):
-    conn = sqlite3.connect(DB_PATH)
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    columns = ", ".join(["employee", "date"] + list(kwargs.keys()))
-    placeholders = ", ".join(["?"] * (2 + len(kwargs)))
-
-    values = [employee, today] + list(kwargs.values())
-
-    conn.execute(f"INSERT INTO analytics ({columns}) VALUES ({placeholders})", values)
-    conn.commit()
-    conn.close()
 
 # ================= UPLOAD CALL =================
 
-@app.route("/upload_call", methods=["POST"])
+@app.route("/upload_call",methods=["POST"])
 @login_required
 def upload_call():
 
-    employee = request.form["employee"]
-    file = request.files["file"]
-
-    df = pd.read_csv(file)
+    emp = request.form["employee"]
+    df = pd.read_csv(request.files["file"])
 
     total_calls = len(df)
-    connected_calls = len(df[df["Action Result"]=="Connected"]) if "Action Result" in df.columns else 0
+    connected = len(df[df["Action Result"]=="Connected"]) if "Action Result" in df.columns else 0
 
-    call_minutes = 0
+    minutes = 0
     if "Duration" in df.columns:
-        df["Duration"] = pd.to_timedelta(df["Duration"], errors="coerce")
-        call_minutes = df["Duration"].dt.total_seconds().sum()/60
+        df["Duration"] = pd.to_timedelta(df["Duration"],errors="coerce")
+        minutes = df["Duration"].dt.total_seconds().sum()/60
 
-    insert_data(employee,
-                total_calls=total_calls,
-                connected_calls=connected_calls,
-                call_minutes=call_minutes)
+    insert_record(emp,total_calls=total_calls,
+                      connected_calls=connected,
+                      call_minutes=minutes)
 
     return redirect("/dashboard")
 
 # ================= UPLOAD FAX =================
 
-@app.route("/upload_fax", methods=["POST"])
+@app.route("/upload_fax",methods=["POST"])
 @login_required
 def upload_fax():
 
-    employee = request.form["employee"]
-    file = request.files["file"]
+    emp = request.form["employee"]
+    df = pd.read_csv(request.files["file"])
 
-    df = pd.read_csv(file)
+    total = len(df)
+    minutes = total*20
 
-    total_faxes = len(df)
-    fax_minutes = total_faxes * 20
-
-    insert_data(employee,
-                total_faxes=total_faxes,
-                fax_minutes=fax_minutes)
-
+    insert_record(emp,total_faxes=total,fax_minutes=minutes)
     return redirect("/dashboard")
 
 # ================= UPLOAD SUMMONS =================
 
-@app.route("/upload_summons", methods=["POST"])
+@app.route("/upload_summons",methods=["POST"])
 @login_required
 def upload_summons():
 
-    employee = request.form["employee"]
-    file = request.files["file"]
+    emp = request.form["employee"]
+    df = pd.read_excel(request.files["file"])
 
-    df = pd.read_excel(file)
+    efile = df["Date of e-Filing"].notna().sum() if "Date of e-Filing" in df.columns else 0
+    served = df["Summons Served by Process Server"].notna().sum() if "Summons Served by Process Server" in df.columns else 0
 
-    efile_count = df["Date of e-Filing"].notna().sum() if "Date of e-Filing" in df.columns else 0
-    served_count = df["Summons Served by Process Server"].notna().sum() if "Summons Served by Process Server" in df.columns else 0
-
-    insert_data(employee,
-                summons_efile_count=efile_count,
-                summons_served_count=served_count)
-
+    insert_record(emp,summons_efile=efile,summons_served=served)
     return redirect("/dashboard")
 
 # ================= UPLOAD CONSOLIDATED =================
 
-@app.route("/upload_consolidated", methods=["POST"])
+@app.route("/upload_consolidated",methods=["POST"])
 @login_required
 def upload_consolidated():
 
-    file = request.files["file"]
-    df = pd.read_excel(file)
+    df = pd.read_excel(request.files["file"])
 
-    for _, row in df.iterrows():
+    for _,row in df.iterrows():
 
-        employee = row.get("Employee")
-        if not employee:
+        emp = row.get("Name") or row.get("Employee")
+        if not emp:
             continue
 
-        insert_data(
-            employee,
-            records_received=row.get("No. of Records Received (MR & MB)",0),
-            records_requested=row.get("Total No. of Records Requested",0),
-            correspondence_received=row.get("No. of Correspondence Received",0),
+        insert_record(
+            emp,
             cases=row.get("No. of cases",0),
-            facilities=row.get("No. of Facilities",0)
+            facilities_total=row.get("Total",0),
+            records_received=row.get("No. of Records Received (MR & MB)",0),
+            correspondence_received=row.get("No. of Correspondence Received",0),
+            expected_records=row.get("Expected",0),
+            barring_rejection=row.get("Shall be receiving (Barring Facility Rejection)",0),
+            records_if_all_docs=row.get("No. of Records would have received if all the docs available",0)
         )
 
     return redirect("/dashboard")
