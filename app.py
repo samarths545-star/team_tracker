@@ -1,7 +1,5 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mail import Mail, Message
-from itsdangerous import URLSafeTimedSerializer
 import pandas as pd
 import sqlite3
 import os
@@ -9,34 +7,67 @@ import os
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# ================= EMAIL CONFIG =================
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = 'samarth@draftandcraft.com'
-app.config['MAIL_PASSWORD'] = 'YOUR_EMAIL_PASSWORD'  # CHANGE THIS
-mail = Mail(app)
-
-serializer = URLSafeTimedSerializer(app.secret_key)
-
-# ================= LOGIN =================
-
 login_manager = LoginManager()
 login_manager.init_app(app)
+login_manager.login_view = "/"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
+
+# ================= DATABASE =================
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS analytics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee TEXT,
+        total_calls INTEGER,
+        connected_calls INTEGER,
+        call_minutes REAL,
+        total_faxes INTEGER,
+        fax_minutes REAL,
+        score REAL
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        case_name TEXT,
+        facility TEXT,
+        created_by TEXT
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS defendants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        case_id INTEGER,
+        defendant_name TEXT,
+        drafted INTEGER DEFAULT 0,
+        efiled INTEGER DEFAULT 0,
+        served INTEGER DEFAULT 0
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # ================= USERS =================
 
 USERS = {
     "Steve": {"password": "Masterlogin3217", "role": "attorney"},
+    "Samarth": {"password": "samarth1511", "role": "master"},
+    "Pragati": {"password": "pragati1711", "role": "master"},
     "Kavish": {"password": "1234", "role": "employee"},
     "Chirag": {"password": "1234", "role": "employee"},
     "Sahil": {"password": "1234", "role": "employee"},
-    "Tushar": {"password": "1234", "role": "employee"},
-    "Samarth": {"password": "samarth1511", "role": "master"},
-    "Pragati": {"password": "pragati1711", "role": "master"}
+    "Tushar": {"password": "1234", "role": "employee"}
 }
 
 class User(UserMixin):
@@ -52,15 +83,21 @@ def load_user(user_id):
 
 # ================= LOGIN =================
 
-@app.route("/", methods=["GET","POST"])
+@app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        u = request.form["username"]
-        p = request.form["password"]
-        if u in USERS and USERS[u]["password"] == p:
-            login_user(User(u, USERS[u]["role"]))
-            return redirect("/dashboard")
-        flash("Invalid credentials")
+        username = request.form["username"]
+        password = request.form["password"]
+
+        if username in USERS and USERS[username]["password"] == password:
+            login_user(User(username, USERS[username]["role"]))
+
+            # Proper redirect
+            if USERS[username]["role"] in ["attorney", "master"]:
+                return redirect("/attorney_dashboard")
+            else:
+                return redirect("/employee_dashboard")
+
     return render_template("login.html")
 
 @app.route("/logout")
@@ -69,54 +106,127 @@ def logout():
     logout_user()
     return redirect("/")
 
-# ================= DASHBOARD ROUTING =================
+# ================= EMPLOYEE DASHBOARD =================
 
-@app.route("/dashboard")
+@app.route("/employee_dashboard")
 @login_required
-def dashboard():
-
-    if current_user.role in ["attorney","master"]:
+def employee_dashboard():
+    if current_user.role not in ["employee", "master"]:
         return redirect("/attorney_dashboard")
-    else:
+    return render_template("employee_dashboard.html")
+
+# ================= ATTORNEY DASHBOARD =================
+
+@app.route("/attorney_dashboard")
+@login_required
+def attorney_dashboard():
+
+    if current_user.role not in ["attorney", "master"]:
         return redirect("/employee_dashboard")
 
-# ================= FORGOT PASSWORD =================
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM analytics", conn)
+    conn.close()
 
-@app.route("/forgot_password", methods=["GET","POST"])
-def forgot_password():
-    if request.method == "POST":
-        email = "samarth@draftandcraft.com"
+    if df.empty:
+        return render_template("attorney_dashboard.html", data=[])
 
-        token = serializer.dumps(email, salt="password-reset")
+    df = df.sort_values("score", ascending=False)
+    df["Rank"] = range(1, len(df)+1)
 
-        reset_link = url_for("reset_password", token=token, _external=True)
+    return render_template("attorney_dashboard.html",
+                           data=df.to_dict(orient="records"))
 
-        msg = Message("Password Reset",
-                      sender="samarth@draftandcraft.com",
-                      recipients=[email])
-        msg.body = f"Click this link to reset password:\n\n{reset_link}"
+# ================= CALL UPLOAD =================
 
-        mail.send(msg)
+@app.route("/upload_call", methods=["POST"])
+@login_required
+def upload_call():
 
-        flash("Reset link sent to email.")
-        return redirect("/")
+    if current_user.role not in ["employee", "master"]:
+        return redirect("/attorney_dashboard")
 
-    return render_template("forgot_password.html")
+    file = request.files["file"]
+    df = pd.read_csv(file)
 
-@app.route("/reset_password/<token>", methods=["GET","POST"])
-def reset_password(token):
-    try:
-        email = serializer.loads(token, salt="password-reset", max_age=3600)
-    except:
-        return "Link expired"
+    total_calls = len(df)
+    connected_calls = len(df[df["Action Result"]=="Connected"]) if "Action Result" in df.columns else 0
 
-    if request.method == "POST":
-        new_password = request.form["password"]
-        USERS["Samarth"]["password"] = new_password
-        flash("Password updated.")
-        return redirect("/")
+    if "Duration" in df.columns:
+        df["Duration"] = pd.to_timedelta(df["Duration"])
+        call_minutes = df["Duration"].dt.total_seconds().sum()/60
+    else:
+        call_minutes = 0
 
-    return render_template("reset_password.html")
+    score = (connected_calls * 2) + (call_minutes / 10)
 
-# ================= EXISTING ROUTES KEPT =================
-# (Your employee_dashboard, attorney_dashboard, uploads, summons stay unchanged)
+    save_analytics(current_user.id, total_calls, connected_calls, call_minutes, 0, 0, score)
+
+    return redirect("/employee_dashboard")
+
+# ================= FAX UPLOAD =================
+
+@app.route("/upload_fax", methods=["POST"])
+@login_required
+def upload_fax():
+
+    if current_user.role not in ["employee", "master"]:
+        return redirect("/attorney_dashboard")
+
+    file = request.files["file"]
+    df = pd.read_csv(file)
+
+    total_faxes = len(df[df["Direction"]=="Outgoing"]) if "Direction" in df.columns else len(df)
+    fax_minutes = total_faxes * 20
+
+    score = total_faxes * 3
+
+    save_analytics(current_user.id, 0, 0, 0, total_faxes, fax_minutes, score)
+
+    return redirect("/employee_dashboard")
+
+def save_analytics(emp, calls, connected, call_min, faxes, fax_min, score):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+    INSERT INTO analytics
+    (employee,total_calls,connected_calls,call_minutes,total_faxes,fax_minutes,score)
+    VALUES (?,?,?,?,?,?,?)
+    """,(emp,calls,connected,call_min,faxes,fax_min,score))
+    conn.commit()
+    conn.close()
+
+# ================= SUMMONS =================
+
+@app.route("/summons")
+@login_required
+def summons():
+    conn = sqlite3.connect(DB_PATH)
+    cases = pd.read_sql_query("SELECT * FROM cases", conn)
+    conn.close()
+    return render_template("summons.html", cases=cases.to_dict(orient="records"))
+
+@app.route("/create_case", methods=["POST"])
+@login_required
+def create_case():
+
+    case_name = request.form["case_name"]
+    facility = request.form["facility"]
+
+    suffix = "(TT)" if facility=="Temple Terrace" else "(FM)"
+    full_case_name = f"{case_name}{suffix}"
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("INSERT INTO cases (case_name,facility,created_by) VALUES (?,?,?)",
+              (full_case_name, facility, current_user.id))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/summons")
+
+# ================= RUN =================
+
+if __name__ == "__main__":
+    app.run(debug=True)
