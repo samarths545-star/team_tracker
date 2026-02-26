@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Master Dashboard</title>
+<title>Dashboard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -9,7 +9,21 @@
 
 <div class="container mt-4">
 
-<h2>Master Control Panel</h2>
+<h2>Welcome {{ user }}</h2>
+
+<!-- DATE FILTER -->
+<form method="GET" class="row mb-4">
+<div class="col">
+<input type="date" name="start_date" class="form-control">
+</div>
+<div class="col">
+<input type="date" name="end_date" class="form-control">
+</div>
+<div class="col">
+<button class="btn btn-dark">Filter</button>
+</div>
+</form>
+
 <hr>
 
 <h4>Upload Consolidated Excel</h4>
@@ -20,53 +34,40 @@
 
 <hr>
 
-<h4>Select Employee</h4>
+<h4>Upload Call / Fax / Summons</h4>
 
-<!-- CALL -->
-<form method="POST" action="/upload_call" enctype="multipart/form-data">
+{% for action,label,color in [
+('/upload_call','Upload Call CSV','success'),
+('/upload_fax','Upload Fax CSV','warning'),
+('/upload_summons','Upload Summons Excel','danger')
+] %}
+
+<form method="POST" action="{{action}}" enctype="multipart/form-data" class="mb-3">
 <select name="employee" class="form-select mb-2">
 {% for e in employees %}
 <option value="{{e}}">{{e}}</option>
 {% endfor %}
 </select>
-<label>Upload Call CSV</label>
 <input type="file" name="file" class="form-control mb-2" required>
-<button class="btn btn-success mb-3">Upload Call</button>
+<button class="btn btn-{{color}}">{{label}}</button>
 </form>
 
-<!-- FAX -->
-<form method="POST" action="/upload_fax" enctype="multipart/form-data">
-<select name="employee" class="form-select mb-2">
-{% for e in employees %}
-<option value="{{e}}">{{e}}</option>
 {% endfor %}
-</select>
-<label>Upload Fax CSV</label>
-<input type="file" name="file" class="form-control mb-2" required>
-<button class="btn btn-warning mb-3">Upload Fax</button>
-</form>
-
-<!-- SUMMONS -->
-<form method="POST" action="/upload_summons" enctype="multipart/form-data">
-<select name="employee" class="form-select mb-2">
-{% for e in employees %}
-<option value="{{e}}">{{e}}</option>
-{% endfor %}
-</select>
-<label>Upload Summons Excel</label>
-<input type="file" name="file" class="form-control mb-2" required>
-<button class="btn btn-danger">Upload Summons</button>
-</form>
 
 <hr>
 
-<h3>Analytics</h3>
+<h3>Performance Analytics</h3>
 
 {% if data %}
+
 <table class="table table-bordered text-center">
 <tr class="table-dark">
 <th>Rank</th>
 <th>Employee</th>
+<th>Calls</th>
+<th>Faxes</th>
+<th>Records</th>
+<th>Summons Served</th>
 <th>Score</th>
 </tr>
 
@@ -74,7 +75,11 @@
 <tr>
 <td>{{row.Rank}}</td>
 <td>{{row.employee}}</td>
-<td>{{row.score|round(2)}}</td>
+<td>{{row.total_calls}}</td>
+<td>{{row.total_faxes}}</td>
+<td>{{row.records_received}}</td>
+<td>{{row.summons_served_count}}</td>
+<td><strong>{{row.score|round(2)}}</strong></td>
 </tr>
 {% endfor %}
 </table>
