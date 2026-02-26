@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
@@ -24,32 +24,17 @@ def init_db():
     CREATE TABLE IF NOT EXISTS analytics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         employee TEXT,
-        total_calls INTEGER,
-        connected_calls INTEGER,
-        call_minutes REAL,
-        total_faxes INTEGER,
-        fax_minutes REAL,
-        score REAL
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_name TEXT,
-        facility TEXT,
-        created_by TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS defendants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_id INTEGER,
-        defendant_name TEXT,
-        drafted INTEGER DEFAULT 0,
-        efiled INTEGER DEFAULT 0,
-        served INTEGER DEFAULT 0
+        total_calls INTEGER DEFAULT 0,
+        connected_calls INTEGER DEFAULT 0,
+        call_minutes REAL DEFAULT 0,
+        total_faxes INTEGER DEFAULT 0,
+        fax_minutes REAL DEFAULT 0,
+        records_received INTEGER DEFAULT 0,
+        cases INTEGER DEFAULT 0,
+        facilities INTEGER DEFAULT 0,
+        summons_efile_count INTEGER DEFAULT 0,
+        summons_served_count INTEGER DEFAULT 0,
+        score REAL DEFAULT 0
     )
     """)
 
@@ -61,42 +46,33 @@ init_db()
 # ================= USERS =================
 
 USERS = {
-    "Steve": {"password": "Masterlogin3217", "role": "attorney"},
-    "Samarth": {"password": "samarth1511", "role": "master"},
-    "Pragati": {"password": "pragati1711", "role": "master"},
-    "Kavish": {"password": "1234", "role": "employee"},
-    "Chirag": {"password": "1234", "role": "employee"},
-    "Sahil": {"password": "1234", "role": "employee"},
-    "Tushar": {"password": "1234", "role": "employee"}
+    "Samarth": {"password": "samarth1511"},
+    "Pragati": {"password": "pragati1711"}
 }
 
+EMPLOYEES = ["Kavish", "Chirag", "Sahil", "Tushar"]
+
 class User(UserMixin):
-    def __init__(self, id, role):
+    def __init__(self, id):
         self.id = id
-        self.role = role
 
 @login_manager.user_loader
 def load_user(user_id):
     if user_id in USERS:
-        return User(user_id, USERS[user_id]["role"])
+        return User(user_id)
     return None
 
 # ================= LOGIN =================
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        u = request.form["username"]
+        p = request.form["password"]
 
-        if username in USERS and USERS[username]["password"] == password:
-            login_user(User(username, USERS[username]["role"]))
-
-            # Proper redirect
-            if USERS[username]["role"] in ["attorney", "master"]:
-                return redirect("/attorney_dashboard")
-            else:
-                return redirect("/employee_dashboard")
+        if u in USERS and USERS[u]["password"] == p:
+            login_user(User(u))
+            return redirect("/dashboard")
 
     return render_template("login.html")
 
@@ -106,127 +82,135 @@ def logout():
     logout_user()
     return redirect("/")
 
-# ================= EMPLOYEE DASHBOARD =================
+# ================= DASHBOARD =================
 
-@app.route("/employee_dashboard")
+@app.route("/dashboard")
 @login_required
-def employee_dashboard():
-    if current_user.role not in ["employee", "master"]:
-        return redirect("/attorney_dashboard")
-    return render_template("employee_dashboard.html")
-
-# ================= ATTORNEY DASHBOARD =================
-
-@app.route("/attorney_dashboard")
-@login_required
-def attorney_dashboard():
-
-    if current_user.role not in ["attorney", "master"]:
-        return redirect("/employee_dashboard")
-
+def dashboard():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM analytics", conn)
     conn.close()
 
-    if df.empty:
-        return render_template("attorney_dashboard.html", data=[])
+    if not df.empty:
+        df = df.groupby("employee").sum(numeric_only=True).reset_index()
 
-    df = df.sort_values("score", ascending=False)
-    df["Rank"] = range(1, len(df)+1)
+        df["score"] = (
+            df["connected_calls"] * 2 +
+            df["call_minutes"]/10 +
+            df["total_faxes"] * 3 +
+            df["records_received"] * 2 +
+            df["summons_efile_count"] * 2 +
+            df["summons_served_count"] * 3
+        )
 
-    return render_template("attorney_dashboard.html",
-                           data=df.to_dict(orient="records"))
+        df = df.sort_values("score", ascending=False)
+        df["Rank"] = range(1, len(df)+1)
+        data = df.to_dict(orient="records")
+    else:
+        data = []
 
-# ================= CALL UPLOAD =================
+    return render_template("master_dashboard.html",
+                           employees=EMPLOYEES,
+                           data=data)
+
+# ================= CONSOLIDATED =================
+
+@app.route("/upload_consolidated", methods=["POST"])
+@login_required
+def upload_consolidated():
+
+    file = request.files["file"]
+    df = pd.read_excel(file)
+
+    conn = sqlite3.connect(DB_PATH)
+
+    for _, row in df.iterrows():
+        employee = row["Employee"]
+        records = row.get("No. of Records Received (MR & MB)",0)
+        cases = row.get("No. of cases",0)
+        facilities = row.get("No. of Facilities",0)
+
+        conn.execute("""
+        INSERT INTO analytics (employee, records_received, cases, facilities)
+        VALUES (?,?,?,?)
+        """,(employee,records,cases,facilities))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/dashboard")
+
+# ================= CALL =================
 
 @app.route("/upload_call", methods=["POST"])
 @login_required
 def upload_call():
 
-    if current_user.role not in ["employee", "master"]:
-        return redirect("/attorney_dashboard")
-
+    employee = request.form["employee"]
     file = request.files["file"]
     df = pd.read_csv(file)
 
     total_calls = len(df)
     connected_calls = len(df[df["Action Result"]=="Connected"]) if "Action Result" in df.columns else 0
 
-    if "Duration" in df.columns:
-        df["Duration"] = pd.to_timedelta(df["Duration"])
-        call_minutes = df["Duration"].dt.total_seconds().sum()/60
-    else:
-        call_minutes = 0
+    df["Duration"] = pd.to_timedelta(df["Duration"])
+    call_minutes = df["Duration"].dt.total_seconds().sum()/60
 
-    score = (connected_calls * 2) + (call_minutes / 10)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+    INSERT INTO analytics (employee,total_calls,connected_calls,call_minutes)
+    VALUES (?,?,?,?)
+    """,(employee,total_calls,connected_calls,call_minutes))
+    conn.commit()
+    conn.close()
 
-    save_analytics(current_user.id, total_calls, connected_calls, call_minutes, 0, 0, score)
+    return redirect("/dashboard")
 
-    return redirect("/employee_dashboard")
-
-# ================= FAX UPLOAD =================
+# ================= FAX =================
 
 @app.route("/upload_fax", methods=["POST"])
 @login_required
 def upload_fax():
 
-    if current_user.role not in ["employee", "master"]:
-        return redirect("/attorney_dashboard")
-
+    employee = request.form["employee"]
     file = request.files["file"]
     df = pd.read_csv(file)
 
-    total_faxes = len(df[df["Direction"]=="Outgoing"]) if "Direction" in df.columns else len(df)
+    total_faxes = len(df)
     fax_minutes = total_faxes * 20
 
-    score = total_faxes * 3
-
-    save_analytics(current_user.id, 0, 0, 0, total_faxes, fax_minutes, score)
-
-    return redirect("/employee_dashboard")
-
-def save_analytics(emp, calls, connected, call_min, faxes, fax_min, score):
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
-    INSERT INTO analytics
-    (employee,total_calls,connected_calls,call_minutes,total_faxes,fax_minutes,score)
-    VALUES (?,?,?,?,?,?,?)
-    """,(emp,calls,connected,call_min,faxes,fax_min,score))
+    INSERT INTO analytics (employee,total_faxes,fax_minutes)
+    VALUES (?,?,?)
+    """,(employee,total_faxes,fax_minutes))
     conn.commit()
     conn.close()
+
+    return redirect("/dashboard")
 
 # ================= SUMMONS =================
 
-@app.route("/summons")
+@app.route("/upload_summons", methods=["POST"])
 @login_required
-def summons():
-    conn = sqlite3.connect(DB_PATH)
-    cases = pd.read_sql_query("SELECT * FROM cases", conn)
-    conn.close()
-    return render_template("summons.html", cases=cases.to_dict(orient="records"))
+def upload_summons():
 
-@app.route("/create_case", methods=["POST"])
-@login_required
-def create_case():
+    employee = request.form["employee"]
+    file = request.files["file"]
+    df = pd.read_excel(file)
 
-    case_name = request.form["case_name"]
-    facility = request.form["facility"]
-
-    suffix = "(TT)" if facility=="Temple Terrace" else "(FM)"
-    full_case_name = f"{case_name}{suffix}"
+    summons_efile_count = df["Date of e-Filing"].notna().sum()
+    summons_served_count = df["Summons Served by Process Server"].notna().sum()
 
     conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute("INSERT INTO cases (case_name,facility,created_by) VALUES (?,?,?)",
-              (full_case_name, facility, current_user.id))
-
+    conn.execute("""
+    INSERT INTO analytics (employee,summons_efile_count,summons_served_count)
+    VALUES (?,?,?)
+    """,(employee,summons_efile_count,summons_served_count))
     conn.commit()
     conn.close()
 
-    return redirect("/summons")
-
-# ================= RUN =================
+    return redirect("/dashboard")
 
 if __name__ == "__main__":
     app.run(debug=True)

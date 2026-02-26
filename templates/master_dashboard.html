@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Master Dashboard</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="container mt-4">
+
+<h2>Master Control Panel</h2>
+<hr>
+
+<h4>Upload Consolidated Excel</h4>
+<form method="POST" action="/upload_consolidated" enctype="multipart/form-data">
+<input type="file" name="file" class="form-control mb-2" required>
+<button class="btn btn-primary">Upload Consolidated</button>
+</form>
+
+<hr>
+
+<h4>Select Employee</h4>
+
+<!-- CALL -->
+<form method="POST" action="/upload_call" enctype="multipart/form-data">
+<select name="employee" class="form-select mb-2">
+{% for e in employees %}
+<option value="{{e}}">{{e}}</option>
+{% endfor %}
+</select>
+<label>Upload Call CSV</label>
+<input type="file" name="file" class="form-control mb-2" required>
+<button class="btn btn-success mb-3">Upload Call</button>
+</form>
+
+<!-- FAX -->
+<form method="POST" action="/upload_fax" enctype="multipart/form-data">
+<select name="employee" class="form-select mb-2">
+{% for e in employees %}
+<option value="{{e}}">{{e}}</option>
+{% endfor %}
+</select>
+<label>Upload Fax CSV</label>
+<input type="file" name="file" class="form-control mb-2" required>
+<button class="btn btn-warning mb-3">Upload Fax</button>
+</form>
+
+<!-- SUMMONS -->
+<form method="POST" action="/upload_summons" enctype="multipart/form-data">
+<select name="employee" class="form-select mb-2">
+{% for e in employees %}
+<option value="{{e}}">{{e}}</option>
+{% endfor %}
+</select>
+<label>Upload Summons Excel</label>
+<input type="file" name="file" class="form-control mb-2" required>
+<button class="btn btn-danger">Upload Summons</button>
+</form>
+
+<hr>
+
+<h3>Analytics</h3>
+
+{% if data %}
+<table class="table table-bordered text-center">
+<tr class="table-dark">
+<th>Rank</th>
+<th>Employee</th>
+<th>Score</th>
+</tr>
+
+{% for row in data %}
+<tr>
+<td>{{row.Rank}}</td>
+<td>{{row.employee}}</td>
+<td>{{row.score|round(2)}}</td>
+</tr>
+{% endfor %}
+</table>
+
+<canvas id="chart"></canvas>
+
+<script>
+const labels = [{% for row in data %}"{{row.employee}}",{% endfor %}];
+const scores = [{% for row in data %}{{row.score}},{% endfor %}];
+
+new Chart(document.getElementById("chart"),{
+type:"bar",
+data:{labels:labels,datasets:[{label:"Performance Score",data:scores}]}
+});
+</script>
+
+{% endif %}
+
+<a href="/logout" class="btn btn-secondary mt-4">Logout</a>
+
+</div>
+</body>
+</html>
