@@ -31,9 +31,12 @@ def init_db():
         call_minutes REAL DEFAULT 0,
         total_faxes INTEGER DEFAULT 0,
         fax_minutes REAL DEFAULT 0,
+        cases INTEGER DEFAULT 0,
+        facilities_total INTEGER DEFAULT 0,
         records_received INTEGER DEFAULT 0,
         expected_records INTEGER DEFAULT 0,
         records_if_all_docs INTEGER DEFAULT 0,
+        correspondence_received INTEGER DEFAULT 0,
         summons_efile INTEGER DEFAULT 0,
         summons_served INTEGER DEFAULT 0
     )
@@ -84,9 +87,9 @@ def insert_record(employee, **kwargs):
     conn = sqlite3.connect(DB_PATH)
     today = datetime.now().strftime("%Y-%m-%d")
 
-    columns = ", ".join(["employee", "date"] + list(kwargs.keys()))
+    columns = ", ".join(["employee","date"] + list(kwargs.keys()))
     placeholders = ", ".join(["?"]*(2+len(kwargs)))
-    values = [employee, today] + list(kwargs.values())
+    values = [employee,today] + list(kwargs.values())
 
     conn.execute(f"INSERT INTO analytics ({columns}) VALUES ({placeholders})", values)
     conn.commit()
@@ -128,7 +131,8 @@ def dashboard():
 
     df = df.groupby("employee").sum(numeric_only=True).reset_index()
 
-    # SAFE KPI CALCULATION
+    # ================= KPIs =================
+
     df["call_efficiency"] = df["connected_calls"] / df["total_calls"].replace(0,1)
     df["communication_time"] = df["call_minutes"] + df["fax_minutes"]
     df["record_fulfillment"] = df["records_received"] / df["expected_records"].replace(0,1)
@@ -171,9 +175,10 @@ def upload_call():
         df["Duration"] = pd.to_timedelta(df["Duration"], errors="coerce")
         minutes = df["Duration"].dt.total_seconds().sum()/60
 
-    insert_record(emp,total_calls=total_calls,
-                      connected_calls=connected,
-                      call_minutes=minutes)
+    insert_record(emp,
+                  total_calls=total_calls,
+                  connected_calls=connected,
+                  call_minutes=minutes)
 
     return redirect("/dashboard")
 
@@ -219,22 +224,63 @@ def upload_summons():
 @login_required
 def upload_consolidated():
 
-    df = safe_read(request.files["file"])
-
-    if df.empty:
+    try:
+        df = pd.read_excel(request.files["file"], header=[0,1])
+    except Exception as e:
+        print("Excel read error:", e)
         return redirect("/dashboard")
+
+    df.columns = [' '.join([str(i) for i in col if str(i) != 'nan']).strip() for col in df.columns]
+    df = df.fillna("")
 
     for _, row in df.iterrows():
 
-        emp = row.get("Name") or row.get("Employee")
+        if "Total" not in str(row):
+            continue
+
+        emp = row.get("Name", "")
         if not emp:
             continue
 
+        try:
+            cases = int(row.filter(like="No. of cases").values[0])
+        except:
+            cases = 0
+
+        try:
+            facilities = int(row.filter(like="Total").values[0])
+        except:
+            facilities = 0
+
+        try:
+            records = int(row.filter(like="No. of Records Received").values[0])
+        except:
+            records = 0
+
+        try:
+            expected = int(row.filter(like="Expected").values[0])
+        except:
+            expected = 0
+
+        try:
+            records_if_all = int(row.filter(like="No. of Records would have received").values[0])
+        except:
+            records_if_all = 0
+
+        try:
+            corr_cols = row.filter(like="Correspondence")
+            correspondence = sum(pd.to_numeric(corr_cols, errors="coerce").fillna(0))
+        except:
+            correspondence = 0
+
         insert_record(
             emp,
-            records_received=row.get("No. of Records Received (MR & MB)",0),
-            expected_records=row.get("Expected",0),
-            records_if_all_docs=row.get("No. of Records would have received if all the docs available",0)
+            cases=cases,
+            facilities_total=facilities,
+            records_received=records,
+            expected_records=expected,
+            records_if_all_docs=records_if_all,
+            correspondence_received=correspondence
         )
 
     return redirect("/dashboard")
