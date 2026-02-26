@@ -1,9 +1,8 @@
-from flask import Flask, render_template, request, redirect, jsonify
+from flask import Flask, render_template, request, redirect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import pandas as pd
 import sqlite3
 import os
-import json
 from datetime import datetime
 
 app = Flask(__name__)
@@ -22,34 +21,20 @@ def init_db():
     c = conn.cursor()
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS performance_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee TEXT,
-            date TEXT,
-            No_of_cases INTEGER,
-            No_of_facilities_total INTEGER,
-            Records_expected INTEGER,
-            Records_received INTEGER,
-            Records_should_be_received INTEGER,
-            Records_if_all_docs_available INTEGER
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS cases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_name TEXT,
-            facility TEXT
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS defendants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id INTEGER,
-            defendant_name TEXT,
-            served INTEGER DEFAULT 0
-        )
+    CREATE TABLE IF NOT EXISTS analytics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee TEXT,
+        total_calls INTEGER,
+        connected_calls INTEGER,
+        call_minutes REAL,
+        total_faxes INTEGER,
+        fax_minutes REAL,
+        records_received INTEGER,
+        correspondence_received INTEGER,
+        cases INTEGER,
+        facilities INTEGER,
+        score REAL
+    )
     """)
 
     conn.commit()
@@ -61,7 +46,6 @@ init_db()
 
 USERS = {
     "BigBossSteve": {"password": "Masterlogin3217", "role": "attorney"},
-    "Samarth": {"password": "Samarth1711", "role": "employee"},
     "Kavish": {"password": "1234", "role": "employee"},
     "Chirag": {"password": "1234", "role": "employee"},
     "Sahil": {"password": "1234", "role": "employee"},
@@ -79,78 +63,6 @@ def load_user(user_id):
         return User(user_id, USERS[user_id]["role"])
     return None
 
-# ================= HELPERS =================
-
-def safe_divide(n, d):
-    try:
-        return float(n) / float(d) if d and float(d) != 0 else 0.0
-    except:
-        return 0.0
-
-def normalize(value, min_v, max_v):
-    if max_v == min_v:
-        return 1
-    return (value - min_v) / (max_v - min_v)
-
-def get_summons_rate():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM defendants")
-    total = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM defendants WHERE served=1")
-    served = c.fetchone()[0]
-    conn.close()
-    return safe_divide(served, total)
-
-# ================= PERFORMANCE =================
-
-def calculate_employee_performance(emp, all_emps):
-
-    rr = emp["Records_received"]
-    rexp = emp["Records_expected"]
-    rshould = emp["Records_should_be_received"]
-    rdocs = emp["Records_if_all_docs_available"]
-    cases = emp["No_of_cases"]
-    facilities = emp["No_of_facilities_total"]
-
-    fulfillment = safe_divide(rr, rshould)
-    efficiency = safe_divide(rr, rexp)
-    documentation = safe_divide(rr, rdocs)
-    case_eff = safe_divide(rr, cases)
-    facility_yield = safe_divide(rr, facilities)
-
-    case_list = [safe_divide(e["Records_received"], e["No_of_cases"]) for e in all_emps]
-    facility_list = [safe_divide(e["Records_received"], e["No_of_facilities_total"]) for e in all_emps]
-
-    norm_case = normalize(case_eff, min(case_list), max(case_list))
-    norm_facility = normalize(facility_yield, min(facility_list), max(facility_list))
-
-    base_score = (
-        fulfillment * 0.30 +
-        efficiency * 0.25 +
-        documentation * 0.20 +
-        norm_case * 0.15 +
-        norm_facility * 0.10
-    ) * 100
-
-    summons_bonus = get_summons_rate() * 10
-    final_score = base_score + summons_bonus
-
-    return {
-        "Employee": emp["employee"],
-        "Final_Score": round(final_score,2),
-        "Summons_Rate": round(get_summons_rate()*100,1)
-    }
-
-def rank_employees(employee_list):
-    results = []
-    for emp in employee_list:
-        results.append(calculate_employee_performance(emp, employee_list))
-    results.sort(key=lambda x: x["Final_Score"], reverse=True)
-    for i, r in enumerate(results):
-        r["Rank"] = i + 1
-    return results
-
 # ================= LOGIN =================
 
 @app.route("/", methods=["GET","POST"])
@@ -160,10 +72,7 @@ def login():
         p = request.form["password"]
         if u in USERS and USERS[u]["password"] == p:
             login_user(User(u, USERS[u]["role"]))
-            if USERS[u]["role"] == "attorney":
-                return redirect("/attorney_dashboard")
-            else:
-                return redirect("/employee_dashboard")
+            return redirect("/attorney_dashboard" if USERS[u]["role"]=="attorney" else "/employee_dashboard")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -186,95 +95,119 @@ def employee_dashboard():
 @app.route("/attorney_dashboard")
 @login_required
 def attorney_dashboard():
-    if current_user.role != "attorney":
-        return redirect("/employee_dashboard")
 
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM performance_history", conn)
+    df = pd.read_sql_query("SELECT * FROM analytics", conn)
     conn.close()
 
     if df.empty:
-        return render_template("attorney_dashboard.html", tables=[])
+        return render_template("attorney_dashboard.html", data=[])
 
-    grouped = df.groupby("employee").sum(numeric_only=True).reset_index()
-    ranked = rank_employees(grouped.to_dict(orient="records"))
+    df = df.sort_values("score", ascending=False)
+    df["Rank"] = range(1, len(df)+1)
 
     return render_template("attorney_dashboard.html",
-                           tables=ranked,
-                           chart_data=json.dumps(ranked))
+                           data=df.to_dict(orient="records"))
 
-# ================= UPLOAD (EMPLOYEE ONLY) =================
+# ================= CALL UPLOAD =================
 
-@app.route("/upload", methods=["POST"])
+@app.route("/upload_call", methods=["POST"])
 @login_required
-def upload():
-    if current_user.role != "employee":
-        return redirect("/attorney_dashboard")
+def upload_call():
+
+    file = request.files["file"]
+    df = pd.read_csv(file)
+
+    total_calls = len(df)
+    connected_calls = len(df[df["Action Result"]=="Connected"]) if "Action Result" in df.columns else 0
+
+    df["Duration"] = pd.to_timedelta(df["Duration"])
+    call_minutes = df["Duration"].dt.total_seconds().sum()/60
+
+    save_temp("call", total_calls, connected_calls, call_minutes)
+
+    return redirect("/employee_dashboard")
+
+# ================= FAX UPLOAD =================
+
+@app.route("/upload_fax", methods=["POST"])
+@login_required
+def upload_fax():
+
+    file = request.files["file"]
+    df = pd.read_csv(file)
+
+    total_faxes = len(df[df["Direction"]=="Outgoing"])
+    fax_minutes = total_faxes * 20  # 20 minute rule
+
+    save_temp("fax", total_faxes, 0, fax_minutes)
+
+    return redirect("/employee_dashboard")
+
+# ================= CONSOLIDATED UPLOAD =================
+
+@app.route("/upload_consolidated", methods=["POST"])
+@login_required
+def upload_consolidated():
 
     file = request.files["file"]
     df = pd.read_excel(file)
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    records_received = df["No. of Records Received (MR & MB)"].sum()
+    correspondence_received = df["No. of Correspondence Received "].sum()
+    cases = df["No. of cases"].sum()
+    facilities = df["No. of Facilities"].sum()
 
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    for _, row in df.iterrows():
-        c.execute("""
-            INSERT INTO performance_history (
-                employee, date,
-                No_of_cases, No_of_facilities_total,
-                Records_expected, Records_received,
-                Records_should_be_received,
-                Records_if_all_docs_available
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            current_user.id,
-            today,
-            row.get("No_of_cases",0),
-            row.get("No_of_facilities_total",0),
-            row.get("Records_expected",0),
-            row.get("Records_received",0),
-            row.get("Records_should_be_received",0),
-            row.get("Records_if_all_docs_available",0)
-        ))
-
-    conn.commit()
-    conn.close()
+    calculate_final_score(records_received, correspondence_received, cases, facilities)
 
     return redirect("/employee_dashboard")
 
-# ================= SUMMONS =================
+# ================= PERFORMANCE LOGIC =================
 
-@app.route("/summons")
-@login_required
-def summons():
-    if current_user.role != "employee":
-        return redirect("/attorney_dashboard")
+temp_storage = {}
+
+def save_temp(type_name, val1, val2, val3):
+    if current_user.id not in temp_storage:
+        temp_storage[current_user.id] = {}
+
+    if type_name=="call":
+        temp_storage[current_user.id]["total_calls"]=val1
+        temp_storage[current_user.id]["connected_calls"]=val2
+        temp_storage[current_user.id]["call_minutes"]=val3
+    elif type_name=="fax":
+        temp_storage[current_user.id]["total_faxes"]=val1
+        temp_storage[current_user.id]["fax_minutes"]=val3
+
+def calculate_final_score(records_received, correspondence_received, cases, facilities):
+
+    data = temp_storage.get(current_user.id, {})
+
+    total_calls = data.get("total_calls",0)
+    connected_calls = data.get("connected_calls",0)
+    call_minutes = data.get("call_minutes",0)
+    total_faxes = data.get("total_faxes",0)
+    fax_minutes = data.get("fax_minutes",0)
+
+    connection_rate = connected_calls/total_calls if total_calls else 0
+    productivity = records_received/(cases if cases else 1)
+
+    score = (
+        connection_rate*20 +
+        (call_minutes/60)*10 +
+        (total_faxes*2) +
+        (records_received*3) +
+        (correspondence_received*2) +
+        productivity*10
+    )
 
     conn = sqlite3.connect(DB_PATH)
-    cases = pd.read_sql_query("SELECT * FROM cases", conn)
-    defendants = pd.read_sql_query("SELECT * FROM defendants", conn)
-    conn.close()
-
-    return render_template("summons.html",
-                           cases=cases.to_dict(orient="records"),
-                           defendants=defendants.to_dict(orient="records"))
-
-@app.route("/toggle_served/<int:def_id>")
-@login_required
-def toggle_served(def_id):
-    if current_user.role != "employee":
-        return redirect("/attorney_dashboard")
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE defendants SET served = CASE WHEN served=1 THEN 0 ELSE 1 END WHERE id=?",(def_id,))
+    conn.execute("""
+    INSERT INTO analytics
+    (employee,total_calls,connected_calls,call_minutes,total_faxes,fax_minutes,
+     records_received,correspondence_received,cases,facilities,score)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """,(current_user.id,total_calls,connected_calls,call_minutes,
+         total_faxes,fax_minutes,records_received,correspondence_received,
+         cases,facilities,score))
     conn.commit()
     conn.close()
-
-    return redirect("/summons")
-
-if __name__ == "__main__":
-    app.run(debug=True)
