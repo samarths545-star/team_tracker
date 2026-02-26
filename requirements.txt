@@ -1,5 +1,7 @@
 Flask
 Flask-Login
+Flask-Mail
+itsdangerous
 pandas
 gunicorn
 openpyxl
