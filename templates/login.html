@@ -54,6 +54,7 @@
             margin: 10px 0;
             border-radius: 6px;
             border: 1px solid #ccc;
+            box-sizing: border-box;
         }
 
         button {
@@ -64,6 +65,8 @@
             border: none;
             border-radius: 6px;
             cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
         }
 
         button:hover {
@@ -82,7 +85,6 @@
             text-decoration: underline;
         }
 
-        /* ===== NEW ADDITION (Safe message styling) ===== */
         .flash-message {
             background-color: #f8d7da;
             color: #842029;
@@ -98,14 +100,14 @@
 <div class="login-container">
 
     <div class="logo-section">
-        <img src="{{ url_for('static', filename='logo1.png') }}" class="logo1">
+        <img src="{{ url_for('static', filename='logo1.png') }}" class="logo1" alt="Logo 1">
         <div class="divider"></div>
-        <img src="{{ url_for('static', filename='logo2.png') }}" class="logo2">
+        <img src="{{ url_for('static', filename='logo2.png') }}" class="logo2" alt="Logo 2">
     </div>
 
-    <h2>Performance Tracking Login</h2>
+    <h2>Performance Tracking System</h2>
+    <p style="color: #666; font-size: 14px;">Medical Records Retrieval Analytics</p>
 
-    <!-- ===== NEW ADDITION (Flashed Messages Support) ===== -->
     {% with messages = get_flashed_messages() %}
         {% if messages %}
             {% for message in messages %}

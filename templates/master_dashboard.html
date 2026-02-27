@@ -1,182 +1,341 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Performance Analytics</title>
+<title>Performance Analytics Dashboard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-body { background-color: #f8f9fa; }
-.card-metric {
-    border-radius: 12px;
-    padding: 15px;
-    color: white;
-}
+    body { background-color: #f8f9fa; }
+    .navbar-custom { background-color: #1f3c88; }
+    .card-metric { border-radius: 12px; padding: 15px; color: white; }
+    .metric-calls { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .metric-fax { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+    .metric-records { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+    .metric-legal { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .flash-message { padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+    .flash-success { background-color: #d4edda; color: #155724; }
+    .flash-error { background-color: #f8d7da; color: #842029; }
+    .insight-text { font-size: 13px; color: #666; margin-top: 5px; }
 </style>
 </head>
 <body>
 
-<div class="container mt-4">
+<nav class="navbar navbar-custom">
+    <div class="container-fluid">
+        <span class="navbar-brand text-white mb-0"><h5>Performance Analytics Dashboard</h5></span>
+        <div>
+            <span class="text-white me-3">Welcome, {{ user }}</span>
+            <a href="/logout" class="btn btn-light btn-sm">Logout</a>
+        </div>
+    </div>
+</nav>
 
-<h2 class="mb-3">Welcome {{ user }}</h2>
+<div class="container-fluid mt-4">
 
-<!-- ================= FILTER ================= -->
+<!-- ================= FLASH MESSAGES ================= -->
+{% with messages = get_flashed_messages() %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="flash-message flash-success">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
 
-<form method="GET" class="row mb-4">
-<div class="col">
-<input type="date" name="start_date" value="{{ request.args.get('start_date','') }}" class="form-control">
+<!-- ================= UPLOAD SECTION ================= -->
+<div class="card mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="mb-0">📤 Upload Data Files</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="/upload" enctype="multipart/form-data">
+            
+            <!-- Employee Selection -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <label class="form-label fw-bold">👤 Select Employee</label>
+                    <select name="employee" class="form-select form-select-lg" required>
+                        <option value="">-- Choose Employee --</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp }}">{{ emp }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- File Uploads -->
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <div class="card border-primary">
+                        <div class="card-body">
+                            <label class="form-label fw-bold">📋 Consolidated Records</label>
+                            <input type="file" name="consolidated" class="form-control" accept=".xlsx,.xls">
+                            <small class="text-muted d-block mt-2">Medical records, facilities, cases, expectations</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="card border-success">
+                        <div class="card-body">
+                            <label class="form-label fw-bold">☎️ Call Log</label>
+                            <input type="file" name="calls" class="form-control" accept=".xlsx,.xls,.csv">
+                            <small class="text-muted d-block mt-2">Phone records with duration (minutes)</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="card border-warning">
+                        <div class="card-body">
+                            <label class="form-label fw-bold">📠 Fax Log</label>
+                            <input type="file" name="faxes" class="form-control" accept=".xlsx,.xls,.csv">
+                            <small class="text-muted d-block mt-2">Fax records (20 min per fax)</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <button type="submit" class="btn btn-primary btn-lg w-100 fw-bold">🚀 Upload All Files</button>
+                </div>
+            </div>
+        </form>
+    </div>
 </div>
-<div class="col">
-<input type="date" name="end_date" value="{{ request.args.get('end_date','') }}" class="form-control">
-</div>
-<div class="col">
-<button class="btn btn-dark">Filter</button>
-</div>
-</form>
 
-<hr>
-
-<!-- ================= CONSOLIDATED UPLOAD ================= -->
-
-<h4>Upload Consolidated Excel</h4>
-<form method="POST" action="/upload_consolidated" enctype="multipart/form-data">
-<input type="file" name="file" class="form-control mb-2" required>
-<button class="btn btn-primary">Upload</button>
-</form>
-
-<hr>
-
-<!-- ================= OTHER UPLOADS ================= -->
-
-<h4>Upload Data</h4>
-
-{% for action,label,color in [
-('/upload_call','Call CSV','success'),
-('/upload_fax','Fax CSV','warning'),
-('/upload_summons','Summons Excel','danger')
-] %}
-
-<form method="POST" action="{{action}}" enctype="multipart/form-data" class="mb-3">
-<select name="employee" class="form-select mb-2">
-{% for e in employees %}
-<option value="{{e}}">{{e}}</option>
-{% endfor %}
-</select>
-<input type="file" name="file" class="form-control mb-2" required>
-<button class="btn btn-{{color}}">Upload {{label}}</button>
-</form>
-
-{% endfor %}
-
-<hr>
-
-<h3 class="mt-4">Performance Analytics</h3>
+{% with messages = get_flashed_messages() %}
+    {% if messages %}
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            {% for message in messages %}
+            <div>✓ {{ message }}</div>
+            {% endfor %}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    {% endif %}
+{% endwith %}
+<!-- ================= PERFORMANCE METRICS ================= -->
 
 {% if data %}
 
-<!-- ================= TABLE ================= -->
+<h4 class="mb-3">Employee Performance Summary</h4>
 
-<table class="table table-bordered text-center align-middle">
-<tr class="table-dark">
-<th>Rank</th>
-<th>Employee</th>
-<th>Total Calls</th>
-<th>Call Minutes</th>
-<th>Total Faxes</th>
-<th>Fax Minutes</th>
-<th>Records Received</th>
-<th>Expected Records</th>
-<th>Summons eFiled</th>
-<th>Summons Served</th>
-<th>Communication</th>
-<th>Records</th>
-<th>Legal</th>
-<th>Operational</th>
-<th>Final Score</th>
-<th>Grade</th>
-</tr>
+<div class="row mb-4">
+    {% for row in data %}
+    <div class="col-md-3 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <strong>{{ row.employee }}</strong>
+                    <span class="badge bg-dark float-end">#{{ row.Rank }}</span>
+                </h5>
+                <p class="card-text">
+                    <small>
+                        <strong>Calls:</strong> {{ row.total_calls }} ({{ row.call_minutes|round(0)|int }} min)<br>
+                        <strong>Faxes:</strong> {{ row.total_faxes }} ({{ row.fax_minutes|round(0)|int }} min)<br>
+                        <strong>Records:</strong> {{ row.records_received }}<br>
+                        <strong>E-Files:</strong> {{ row.summons_efile }}<br>
+                        <strong>Served:</strong> {{ row.summons_served }}
+                    </small>
+                </p>
+                <hr>
+                <h6>Final Score: <strong>{{ row.final_score|round(2) }}</strong></h6>
+                <p class="text-center">
+                    {% if row.Grade == "A+" %}
+                        <span class="badge bg-success fs-6">{{ row.Grade }}</span>
+                    {% elif row.Grade == "A" %}
+                        <span class="badge bg-primary fs-6">{{ row.Grade }}</span>
+                    {% elif row.Grade == "B" %}
+                        <span class="badge bg-info fs-6">{{ row.Grade }}</span>
+                    {% elif row.Grade == "C" %}
+                        <span class="badge bg-warning fs-6">{{ row.Grade }}</span>
+                    {% else %}
+                        <span class="badge bg-danger fs-6">{{ row.Grade }}</span>
+                    {% endif %}
+                </p>
+                {% if row.employee in insights %}
+                <div class="insight-text">
+                    <strong>📊 Insight:</strong> {{ insights[row.employee] }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 
-{% for row in data %}
-<tr>
-<td><strong>{{row.Rank}}</strong></td>
-<td><strong>{{row.employee}}</strong></td>
-<td>{{row.total_calls}}</td>
-<td>{{row.call_minutes|round(1)}}</td>
-<td>{{row.total_faxes}}</td>
-<td>{{row.fax_minutes}}</td>
-<td>{{row.records_received}}</td>
-<td>{{row.expected_records}}</td>
-<td>{{row.summons_efile}}</td>
-<td>{{row.summons_served}}</td>
-<td>{{row.communication_score|round(1)}}</td>
-<td>{{row.records_score|round(1)}}</td>
-<td>{{row.legal_score|round(1)}}</td>
-<td>{{row.operational_score|round(1)}}</td>
-<td><strong>{{row.final_score|round(2)}}</strong></td>
-<td>
-{% if row.Grade == "A+" %}
-<span class="badge bg-success">{{row.Grade}}</span>
-{% elif row.Grade == "A" %}
-<span class="badge bg-primary">{{row.Grade}}</span>
-{% elif row.Grade == "B" %}
-<span class="badge bg-warning text-dark">{{row.Grade}}</span>
-{% elif row.Grade == "C" %}
-<span class="badge bg-secondary">{{row.Grade}}</span>
-{% else %}
-<span class="badge bg-danger">{{row.Grade}}</span>
-{% endif %}
-</td>
-</tr>
-{% endfor %}
+<hr>
+
+<!-- ================= DETAILED TABLE ================= -->
+
+<h4 class="mb-3">Detailed Performance Table</h4>
+
+<div class="table-responsive">
+<table class="table table-bordered table-hover text-center align-middle">
+    <thead class="table-dark">
+        <tr>
+            <th>Rank</th>
+            <th>Employee</th>
+            <th>Total Calls</th>
+            <th>Call Minutes</th>
+            <th>Total Faxes</th>
+            <th>Fax Minutes</th>
+            <th>Records Received</th>
+            <th>Expected Records</th>
+            <th>E-File Count</th>
+            <th>Served Count</th>
+            <th>Communication Score</th>
+            <th>Records Score</th>
+            <th>Legal Score</th>
+            <th>Final Score</th>
+            <th>Grade</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr>
+            <td><strong>{{ row.Rank }}</strong></td>
+            <td><strong>{{ row.employee }}</strong></td>
+            <td>{{ row.total_calls }}</td>
+            <td>{{ row.call_minutes|round(1) }}</td>
+            <td>{{ row.total_faxes }}</td>
+            <td>{{ row.fax_minutes|round(1) }}</td>
+            <td>{{ row.records_received }}</td>
+            <td>{{ row.expected_records }}</td>
+            <td>{{ row.summons_efile }}</td>
+            <td>{{ row.summons_served }}</td>
+            <td>{{ row.communication_score|round(1) }}</td>
+            <td>{{ row.records_score|round(1) }}</td>
+            <td>{{ row.legal_score|round(1) }}</td>
+            <td><strong>{{ row.final_score|round(2) }}</strong></td>
+            <td>
+                {% if row.Grade == "A+" %}
+                    <span class="badge bg-success">{{ row.Grade }}</span>
+                {% elif row.Grade == "A" %}
+                    <span class="badge bg-primary">{{ row.Grade }}</span>
+                {% elif row.Grade == "B" %}
+                    <span class="badge bg-info">{{ row.Grade }}</span>
+                {% elif row.Grade == "C" %}
+                    <span class="badge bg-warning text-dark">{{ row.Grade }}</span>
+                {% else %}
+                    <span class="badge bg-danger">{{ row.Grade }}</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
 </table>
+</div>
 
 <hr>
 
 <!-- ================= CHARTS ================= -->
 
-<h4 class="mt-4">Performance Overview</h4>
+<h4 class="mb-3">Performance Visualizations</h4>
 
-<canvas id="barChart"></canvas>
-<canvas id="pieChart" class="mt-5"></canvas>
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-dark text-white">Final Scores</div>
+            <div class="card-body">
+                <canvas id="barChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-dark text-white">Score Distribution</div>
+            <div class="card-body">
+                <canvas id="pieChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-12 mb-4">
+        <div class="card">
+            <div class="card-header bg-dark text-white">Score Breakdown by Category</div>
+            <div class="card-body">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
 const labels = [{% for row in data %}"{{row.employee}}",{% endfor %}];
-const scores = [{% for row in data %}{{row.final_score}},{% endfor %}];
-const communication = [{% for row in data %}{{row.communication_score}},{% endfor %}];
-const records = [{% for row in data %}{{row.records_score}},{% endfor %}];
-const legal = [{% for row in data %}{{row.legal_score}},{% endfor %}];
-const operational = [{% for row in data %}{{row.operational_score}},{% endfor %}];
+const finalScores = [{% for row in data %}{{row.final_score}},{% endfor %}];
+const commScores = [{% for row in data %}{{row.communication_score}},{% endfor %}];
+const recScores = [{% for row in data %}{{row.records_score}},{% endfor %}];
+const legalScores = [{% for row in data %}{{row.legal_score}},{% endfor %}];
 
-// Bar Chart
-new Chart(document.getElementById("barChart"),{
-type:"bar",
-data:{
-labels:labels,
-datasets:[
-{label:"Final Score",data:scores},
-{label:"Communication",data:communication},
-{label:"Records",data:records},
-{label:"Legal",data:legal},
-{label:"Operational",data:operational}
-]
-},
-options:{
-responsive:true,
-plugins:{legend:{position:"top"}},
-scales:{y:{beginAtZero:true,max:100}}
-}
+// Bar Chart - Final Scores
+new Chart(document.getElementById("barChart"), {
+    type: "bar",
+    data: {
+        labels: labels,
+        datasets: [{
+            label: "Final Score",
+            data: finalScores,
+            backgroundColor: ["#667eea", "#764ba2", "#43e97b", "#f5576c"],
+            borderColor: "#333",
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+    }
 });
 
-// Pie Chart
-new Chart(document.getElementById("pieChart"),{
-type:"pie",
-data:{labels:labels,datasets:[{data:scores}]}
+// Pie Chart - Distribution
+new Chart(document.getElementById("pieChart"), {
+    type: "pie",
+    data: {
+        labels: labels,
+        datasets: [{
+            data: finalScores,
+            backgroundColor: ["#667eea", "#764ba2", "#43e97b", "#f5576c"],
+            borderColor: "#fff",
+            borderWidth: 2
+        }]
+    },
+    options: { responsive: true, plugins: { legend: { position: "bottom" } } }
+});
+
+// Category Breakdown
+new Chart(document.getElementById("categoryChart"), {
+    type: "bar",
+    data: {
+        labels: labels,
+        datasets: [
+            { label: "Communication", data: commScores, backgroundColor: "#667eea" },
+            { label: "Records", data: recScores, backgroundColor: "#43e97b" },
+            { label: "Legal", data: legalScores, backgroundColor: "#f5576c" }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: "top" } },
+        scales: { y: { stacked: false, beginAtZero: true } }
+    }
 });
 </script>
 
+{% else %}
+
+<div class="alert alert-info">
+    <h5>No data yet</h5>
+    <p>Upload consolidated records and call/fax logs to see performance analytics.</p>
+</div>
+
 {% endif %}
 
-<a href="/logout" class="btn btn-secondary mt-4">Logout</a>
-
 </div>
+
 </body>
 </html>
