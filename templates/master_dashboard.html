@@ -22,9 +22,15 @@ body { background-color: #f8f9fa; }
 <!-- ================= FILTER ================= -->
 
 <form method="GET" class="row mb-4">
-<div class="col"><input type="date" name="start_date" class="form-control"></div>
-<div class="col"><input type="date" name="end_date" class="form-control"></div>
-<div class="col"><button class="btn btn-dark">Filter</button></div>
+<div class="col">
+<input type="date" name="start_date" value="{{ request.args.get('start_date','') }}" class="form-control">
+</div>
+<div class="col">
+<input type="date" name="end_date" value="{{ request.args.get('end_date','') }}" class="form-control">
+</div>
+<div class="col">
+<button class="btn btn-dark">Filter</button>
+</div>
 </form>
 
 <hr>
