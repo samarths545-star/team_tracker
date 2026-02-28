@@ -1,201 +1,456 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Performance Analytics Dashboard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-    body { background-color: #f8f9fa; }
-    .navbar-custom { background-color: #1f3c88; }
-    .card-metric { border-radius: 12px; padding: 15px; color: white; }
-    .metric-calls { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    .metric-fax { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-    .metric-records { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-    .metric-legal { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-    .flash-message { padding: 12px; border-radius: 6px; margin-bottom: 15px; }
-    .flash-success { background-color: #d4edda; color: #155724; }
-    .flash-error { background-color: #f8d7da; color: #842029; }
-    .insight-text { font-size: 13px; color: #666; margin-top: 5px; }
+/* ─── Base ─────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#f0f4ff;color:#1a1a2e;min-height:100vh}
+
+/* ─── Navbar ────────────────────────────────────────── */
+.navbar-custom{
+  background:linear-gradient(135deg,#1f3c88 0%,#2d55b8 100%);
+  padding:12px 24px;
+  box-shadow:0 4px 20px rgba(31,60,136,.3);
+}
+.navbar-custom .brand{font-size:1.1rem;font-weight:700;color:#fff;letter-spacing:.5px}
+.navbar-custom .welcome{color:rgba(255,255,255,.8);font-size:.88rem}
+
+/* ─── Animated gradient header strip ───────────────── */
+.header-strip{
+  height:4px;
+  background:linear-gradient(90deg,#667eea,#764ba2,#f5576c,#43e97b,#667eea);
+  background-size:300% 100%;
+  animation:gradientShift 4s ease infinite;
+}
+@keyframes gradientShift{0%{background-position:0%}100%{background-position:300%}}
+
+/* ─── Cards ─────────────────────────────────────────── */
+.card{
+  border:none;
+  border-radius:16px;
+  box-shadow:0 4px 20px rgba(31,60,136,.08);
+  transition:transform .25s, box-shadow .25s;
+  overflow:hidden;
+}
+.card:hover{transform:translateY(-3px);box-shadow:0 10px 32px rgba(31,60,136,.15)}
+
+.card-header-custom{
+  background:linear-gradient(135deg,#1f3c88,#2d55b8);
+  color:#fff;
+  padding:14px 20px;
+  font-weight:600;
+  font-size:.95rem;
+}
+
+/* ─── Metric employee cards ─────────────────────────── */
+.emp-card{border-radius:18px;overflow:hidden;position:relative}
+.emp-card-header{
+  padding:16px 20px 12px;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.emp-card-header.grade-aplus{background:linear-gradient(135deg,#11998e,#38ef7d)}
+.emp-card-header.grade-a    {background:linear-gradient(135deg,#1f3c88,#3b6fd4)}
+.emp-card-header.grade-b    {background:linear-gradient(135deg,#0891b2,#22d3ee)}
+.emp-card-header.grade-c    {background:linear-gradient(135deg,#d97706,#fbbf24)}
+.emp-card-header.grade-d    {background:linear-gradient(135deg,#dc2626,#f87171)}
+.emp-name{font-size:1.05rem;font-weight:700;color:#fff}
+.rank-badge{
+  background:rgba(255,255,255,.25);
+  color:#fff;font-weight:700;font-size:.75rem;
+  padding:4px 10px;border-radius:20px;
+  border:1px solid rgba(255,255,255,.4);
+}
+.grade-badge-lg{
+  font-size:1.6rem;font-weight:800;color:#fff;
+  text-shadow:0 2px 8px rgba(0,0,0,.2);
+}
+.emp-card-body{padding:16px 20px}
+.stat-row{display:flex;justify-content:space-between;align-items:center;
+          padding:5px 0;border-bottom:1px solid #f0f4ff;font-size:.82rem}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:#64748b;font-weight:500}
+.stat-value{font-weight:600;color:#1f3c88}
+
+/* ─── Score bar ─────────────────────────────────────── */
+.score-track{background:#e2e8f0;border-radius:99px;height:10px;overflow:hidden;margin:6px 0 12px}
+.score-fill{
+  height:10px;border-radius:99px;
+  background:linear-gradient(90deg,#667eea,#43e97b);
+  transition:width 1.2s cubic-bezier(.4,0,.2,1);
+}
+
+/* ─── Insight box ───────────────────────────────────── */
+.insight-box{
+  background:#f8faff;
+  border-left:4px solid #667eea;
+  border-radius:0 8px 8px 0;
+  padding:10px 14px;
+  font-size:.8rem;
+  color:#334155;
+  margin-top:10px;
+  line-height:1.6;
+}
+
+/* ─── Sub-score mini bars ───────────────────────────── */
+.mini-scores{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0}
+.mini-score-item{text-align:center}
+.mini-score-label{font-size:.68rem;color:#64748b;margin-bottom:3px}
+.mini-score-val{font-size:1.1rem;font-weight:700;color:#1f3c88}
+.mini-score-max{font-size:.65rem;color:#94a3b8}
+
+/* ─── Table ─────────────────────────────────────────── */
+.perf-table{font-size:.8rem;border-radius:12px;overflow:hidden}
+.perf-table thead th{
+  background:#1f3c88;color:#fff;font-weight:600;
+  padding:12px 10px;text-align:center;border:none;white-space:nowrap;
+}
+.perf-table tbody tr{transition:background .15s}
+.perf-table tbody tr:hover{background:#eef2ff !important}
+.perf-table tbody td{padding:10px;text-align:center;vertical-align:middle;border-color:#e2e8f0}
+.perf-table tbody tr:nth-child(even){background:#f8faff}
+.new-col{background:#fffbeb !important}   /* highlight the 3 new columns */
+
+/* ─── Grade pill ────────────────────────────────────── */
+.grade-pill{
+  display:inline-block;padding:4px 14px;border-radius:20px;
+  font-weight:700;font-size:.8rem;letter-spacing:.5px;
+}
+.gp-aplus{background:#dcfce7;color:#15803d}
+.gp-a    {background:#dbeafe;color:#1d4ed8}
+.gp-b    {background:#cffafe;color:#0e7490}
+.gp-c    {background:#fef9c3;color:#854d0e}
+.gp-d    {background:#fee2e2;color:#991b1b}
+
+/* ─── Flash messages ────────────────────────────────── */
+.flash-wrap{position:fixed;top:72px;right:20px;z-index:9999;width:360px}
+.flash-item{
+  padding:12px 16px;border-radius:10px;margin-bottom:8px;
+  font-size:.85rem;font-weight:500;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);
+  animation:slideIn .3s ease;
+}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:none;opacity:1}}
+.flash-ok  {background:#f0fdf4;color:#166534;border-left:4px solid #22c55e}
+.flash-info{background:#eff6ff;color:#1e40af;border-left:4px solid #3b82f6}
+.flash-err {background:#fef2f2;color:#991b1b;border-left:4px solid #ef4444}
+
+/* ─── Upload card inputs ────────────────────────────── */
+.upload-zone{
+  border:2px dashed #c7d2fe;border-radius:12px;
+  padding:16px;text-align:center;
+  background:#fafbff;transition:border-color .2s,background .2s;cursor:pointer;
+}
+.upload-zone:hover{border-color:#667eea;background:#eef2ff}
+.upload-zone input[type=file]{display:none}
+.upload-zone label{cursor:pointer;font-size:.85rem;color:#4f46e5;font-weight:500}
+
+/* ─── History table ─────────────────────────────────── */
+.hist-table{font-size:.78rem}
+.hist-table td,.hist-table th{padding:7px 10px;vertical-align:middle}
+.btn-del{
+  background:#fee2e2;color:#dc2626;border:none;
+  padding:4px 10px;border-radius:8px;font-size:.75rem;font-weight:600;
+  cursor:pointer;transition:background .2s;
+}
+.btn-del:hover{background:#fca5a5}
+
+/* ─── Filter bar ────────────────────────────────────── */
+.filter-bar{
+  background:#fff;border-radius:12px;padding:14px 20px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  box-shadow:0 2px 10px rgba(31,60,136,.07);
+}
+.filter-bar label{font-size:.82rem;font-weight:600;color:#475569;white-space:nowrap}
+.filter-bar input[type=date]{
+  border:1.5px solid #c7d2fe;border-radius:8px;
+  padding:6px 10px;font-size:.82rem;outline:none;
+}
+.filter-bar input[type=date]:focus{border-color:#667eea}
+
+/* ─── Export buttons ────────────────────────────────── */
+.btn-export{
+  padding:8px 18px;border-radius:10px;font-size:.82rem;
+  font-weight:600;border:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;
+  transition:transform .15s,box-shadow .15s;
+}
+.btn-export:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,0,0,.15)}
+.btn-pdf  {background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff}
+.btn-xlsx {background:linear-gradient(135deg,#16a34a,#15803d);color:#fff}
+
+/* ─── Formula box ───────────────────────────────────── */
+.formula-box{
+  background:linear-gradient(135deg,#f0f4ff,#e8edff);
+  border:1px solid #c7d2fe;border-radius:12px;
+  padding:14px 18px;font-size:.8rem;color:#334155;line-height:1.8;
+}
+
+/* ─── Charts ────────────────────────────────────────── */
+.chart-card canvas{max-height:260px}
+
+/* ─── Section title ─────────────────────────────────── */
+.section-title{
+  font-size:1rem;font-weight:700;color:#1f3c88;
+  margin-bottom:16px;padding-bottom:6px;
+  border-bottom:3px solid #e2e8f0;
+  display:flex;align-items:center;gap:8px;
+}
+
+/* ─── Upload label input ────────────────────────────── */
+.label-input{
+  border:1.5px solid #c7d2fe;border-radius:8px;
+  padding:8px 12px;font-size:.85rem;width:100%;outline:none;
+}
+.label-input:focus{border-color:#667eea;box-shadow:0 0 0 3px rgba(102,126,234,.15)}
+
+/* ─── Animations ────────────────────────────────────── */
+.fade-in{animation:fadeIn .5s ease both}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.stagger-1{animation-delay:.05s}
+.stagger-2{animation-delay:.1s}
+.stagger-3{animation-delay:.15s}
+.stagger-4{animation-delay:.2s}
 </style>
 </head>
 <body>
 
-<nav class="navbar navbar-custom">
-    <div class="container-fluid">
-        <span class="navbar-brand text-white mb-0"><h5>Performance Analytics Dashboard</h5></span>
-        <div>
-            <span class="text-white me-3">Welcome, {{ user }}</span>
-            <a href="/logout" class="btn btn-light btn-sm">Logout</a>
-        </div>
-    </div>
+<!-- ─── Navbar ─────────────────────────────────────── -->
+<nav class="navbar-custom d-flex align-items-center justify-content-between">
+  <span class="brand">📊 Performance Analytics Dashboard</span>
+  <div class="d-flex align-items-center gap-3">
+    <span class="welcome">Welcome, {{ user }}</span>
+    <a href="/logout" class="btn btn-sm btn-light fw-semibold">Logout</a>
+  </div>
 </nav>
+<div class="header-strip"></div>
 
-<div class="container-fluid mt-4">
-
-<!-- ================= FLASH MESSAGES ================= -->
+<!-- ─── Flash Messages ─────────────────────────────── -->
+<div class="flash-wrap" id="flashWrap">
 {% with messages = get_flashed_messages() %}
-    {% if messages %}
-        {% for message in messages %}
-            <div class="flash-message flash-success">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
+  {% if messages %}
+    {% for msg in messages %}
+      <div class="flash-item {% if 'ℹ️' in msg %}flash-info{% elif 'Error' in msg %}flash-err{% else %}flash-ok{% endif %}">
+        {{ msg }}
+        <button onclick="this.parentElement.remove()" style="float:right;background:none;border:none;cursor:pointer;font-size:14px;color:inherit">✕</button>
+      </div>
+    {% endfor %}
+  {% endif %}
 {% endwith %}
-
-<!-- ================= UPLOAD SECTION ================= -->
-<div class="card mb-4">
-    <div class="card-header bg-dark text-white">
-        <h5 class="mb-0">📤 Upload Data Files</h5>
-    </div>
-    <div class="card-body">
-        <form method="POST" action="/upload" enctype="multipart/form-data">
-            
-            <!-- Employee Selection -->
-            <div class="row mb-3">
-                <div class="col-md-12">
-                    <label class="form-label fw-bold">👤 Select Employee</label>
-                    <select name="employee" class="form-select form-select-lg" required>
-                        <option value="">-- Choose Employee --</option>
-                        {% for emp in employees %}
-                        <option value="{{ emp }}">{{ emp }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-
-            <hr>
-
-            <!-- File Uploads -->
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <div class="card border-primary">
-                        <div class="card-body">
-                            <label class="form-label fw-bold">📋 Consolidated Records</label>
-                            <input type="file" name="consolidated" class="form-control" accept=".xlsx,.xls">
-                            <small class="text-muted d-block mt-2">Medical records, facilities, cases, expectations</small>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-4 mb-3">
-                    <div class="card border-success">
-                        <div class="card-body">
-                            <label class="form-label fw-bold">☎️ Call Log</label>
-                            <input type="file" name="calls" class="form-control" accept=".xlsx,.xls,.csv">
-                            <small class="text-muted d-block mt-2">Phone records with duration (minutes)</small>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-4 mb-3">
-                    <div class="card border-warning">
-                        <div class="card-body">
-                            <label class="form-label fw-bold">📠 Fax Log</label>
-                            <input type="file" name="faxes" class="form-control" accept=".xlsx,.xls,.csv">
-                            <small class="text-muted d-block mt-2">Fax records (20 min per fax)</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row mt-3">
-                <div class="col-md-12">
-                    <button type="submit" class="btn btn-primary btn-lg w-100 fw-bold">🚀 Upload All Files</button>
-                </div>
-            </div>
-        </form>
-    </div>
 </div>
 
-{% with messages = get_flashed_messages() %}
-    {% if messages %}
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            {% for message in messages %}
-            <div>✓ {{ message }}</div>
+<div class="container-fluid p-4">
+
+<!-- ─── Top bar: Filter + Export ─────────────────────── -->
+<div class="filter-bar mb-4 fade-in">
+  <form method="GET" action="/dashboard" class="d-flex align-items-center gap-3 flex-wrap w-100">
+    <label>📅 Date Range:</label>
+    <div class="d-flex align-items-center gap-2">
+      <input type="date" name="date_from" value="{{ date_from }}" placeholder="From">
+      <span style="color:#94a3b8">→</span>
+      <input type="date" name="date_to"   value="{{ date_to }}"   placeholder="To">
+      <button class="btn btn-primary btn-sm fw-semibold" type="submit">Filter</button>
+      {% if date_from or date_to %}
+      <a href="/dashboard" class="btn btn-outline-secondary btn-sm">Clear</a>
+      {% endif %}
+    </div>
+    <div class="ms-auto d-flex gap-2">
+      <a href="/export/pdf?date_from={{ date_from }}&date_to={{ date_to }}" class="btn-export btn-pdf">
+        📄 Download PDF
+      </a>
+      <a href="/export/excel?date_from={{ date_from }}&date_to={{ date_to }}" class="btn-export btn-xlsx">
+        📊 Download Excel
+      </a>
+    </div>
+  </form>
+</div>
+
+<!-- ─── Upload Section ────────────────────────────────── -->
+<div class="card mb-4 fade-in stagger-1">
+  <div class="card-header-custom d-flex align-items-center gap-2">
+    📤 Upload Weekly Data Files
+  </div>
+  <div class="card-body p-4">
+    <form method="POST" action="/upload" enctype="multipart/form-data">
+
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" style="font-size:.85rem">👤 Employee</label>
+          <select name="employee" class="form-select" required>
+            <option value="">-- Select Employee --</option>
+            {% for emp in employees %}
+            <option value="{{ emp }}">{{ emp }}</option>
             {% endfor %}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </select>
         </div>
-    {% endif %}
-{% endwith %}
-<!-- ================= PERFORMANCE METRICS ================= -->
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" style="font-size:.85rem">🏷️ Upload Label <small class="text-muted">(e.g. "Week of 26 May 2025")</small></label>
+          <input type="text" name="upload_label" class="label-input"
+                 placeholder="Week of {{ '' }}..." value="">
+        </div>
+      </div>
+
+      <div class="row">
+        <!-- Consolidated -->
+        <div class="col-md-4 mb-3">
+          <div class="upload-zone" onclick="document.getElementById('f_cons').click()">
+            <div style="font-size:1.8rem;margin-bottom:6px">📋</div>
+            <label for="f_cons" class="fw-semibold">Consolidated Records</label>
+            <p style="font-size:.75rem;color:#94a3b8;margin-top:4px">Medical records · cases · facilities</p>
+            <input type="file" id="f_cons" name="consolidated" accept=".xlsx,.xls"
+                   onchange="showName(this,'cons-name')">
+            <div id="cons-name" style="font-size:.75rem;color:#4f46e5;margin-top:6px"></div>
+          </div>
+        </div>
+        <!-- Calls -->
+        <div class="col-md-4 mb-3">
+          <div class="upload-zone" onclick="document.getElementById('f_calls').click()">
+            <div style="font-size:1.8rem;margin-bottom:6px">☎️</div>
+            <label for="f_calls" class="fw-semibold">Call Log</label>
+            <p style="font-size:.75rem;color:#94a3b8;margin-top:4px">Phone records with duration column</p>
+            <input type="file" id="f_calls" name="calls" accept=".xlsx,.xls,.csv"
+                   onchange="showName(this,'calls-name')">
+            <div id="calls-name" style="font-size:.75rem;color:#4f46e5;margin-top:6px"></div>
+          </div>
+        </div>
+        <!-- Faxes -->
+        <div class="col-md-4 mb-3">
+          <div class="upload-zone" onclick="document.getElementById('f_faxes').click()">
+            <div style="font-size:1.8rem;margin-bottom:6px">📠</div>
+            <label for="f_faxes" class="fw-semibold">Fax Log</label>
+            <p style="font-size:.75rem;color:#94a3b8;margin-top:4px">Exact-duplicate rows auto-removed · 20 min/fax</p>
+            <input type="file" id="f_faxes" name="faxes" accept=".xlsx,.xls,.csv"
+                   onchange="showName(this,'faxes-name')">
+            <div id="faxes-name" style="font-size:.75rem;color:#4f46e5;margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-secondary py-2 mb-3" style="font-size:.8rem;border-radius:10px">
+        🔒 <strong>Duplicate protection active:</strong> Re-uploading the same data will not double-count — only new rows are added. Previous weeks' data is preserved.
+      </div>
+      <button type="submit" class="btn btn-primary w-100 fw-bold" style="border-radius:10px;padding:12px">
+        🚀 Upload & Analyse
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ─── Formula ──────────────────────────────────────── -->
+<div class="formula-box mb-4 fade-in stagger-1">
+  📐 {{ formula|safe }}
+</div>
 
 {% if data %}
 
-<h4 class="mb-3">Employee Performance Summary</h4>
+<!-- ─── Employee Cards ────────────────────────────────── -->
+<div class="section-title fade-in">🏆 Employee Performance Summary <small class="text-muted fw-normal ms-2" style="font-size:.8rem">(Scores out of 100)</small></div>
 
 <div class="row mb-4">
-    {% for row in data %}
-    <div class="col-md-3 mb-3">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <strong>{{ row.employee }}</strong>
-                    <span class="badge bg-dark float-end">#{{ row.Rank }}</span>
-                </h5>
-                <p class="card-text">
-                    <small>
-                        <strong>Calls:</strong> {{ row.total_calls }} ({{ row.call_minutes|round(0)|int }} min)<br>
-                        <strong>Faxes:</strong> {{ row.total_faxes }} ({{ row.fax_minutes|round(0)|int }} min)<br>
-                        <strong>Records:</strong> {{ row.records_received }}<br>
-                        <strong>E-Files:</strong> {{ row.summons_efile }}<br>
-                        <strong>Served:</strong> {{ row.summons_served }}
-                    </small>
-                </p>
-                <hr>
-                <h6>Final Score: <strong>{{ row.final_score|round(2) }}</strong></h6>
-                <p class="text-center">
-                    {% if row.Grade == "A+" %}
-                        <span class="badge bg-success fs-6">{{ row.Grade }}</span>
-                    {% elif row.Grade == "A" %}
-                        <span class="badge bg-primary fs-6">{{ row.Grade }}</span>
-                    {% elif row.Grade == "B" %}
-                        <span class="badge bg-info fs-6">{{ row.Grade }}</span>
-                    {% elif row.Grade == "C" %}
-                        <span class="badge bg-warning fs-6">{{ row.Grade }}</span>
-                    {% else %}
-                        <span class="badge bg-danger fs-6">{{ row.Grade }}</span>
-                    {% endif %}
-                </p>
-                {% if row.employee in insights %}
-                <div class="insight-text">
-                    <strong>📊 Insight:</strong> {{ insights[row.employee] }}
-                </div>
-                {% endif %}
-            </div>
-        </div>
+{% for row in data %}
+{% set gclass = 'grade-aplus' if row.Grade=='A+' else ('grade-a' if row.Grade=='A' else ('grade-b' if row.Grade=='B' else ('grade-c' if row.Grade=='C' else 'grade-d'))) %}
+{% set gpill  = 'gp-aplus'   if row.Grade=='A+' else ('gp-a'   if row.Grade=='A' else ('gp-b'   if row.Grade=='B' else ('gp-c'   if row.Grade=='C' else 'gp-d'))) %}
+
+<div class="col-xl-3 col-lg-4 col-md-6 mb-4 fade-in stagger-{{ loop.index }}">
+  <div class="card emp-card h-100">
+    <!-- Coloured header -->
+    <div class="emp-card-header {{ gclass }}">
+      <div>
+        <div class="emp-name">{{ row.employee }}</div>
+        <div style="font-size:.72rem;color:rgba(255,255,255,.8);margin-top:2px">Rank #{{ row.Rank }}</div>
+      </div>
+      <div class="grade-badge-lg">{{ row.Grade }}</div>
     </div>
-    {% endfor %}
+
+    <div class="emp-card-body">
+      <!-- Score bar -->
+      <div class="d-flex justify-content-between" style="font-size:.75rem;color:#64748b">
+        <span>Final Score</span>
+        <span class="fw-bold" style="color:#1f3c88">{{ row.final_score|round(1) }} / 100</span>
+      </div>
+      <div class="score-track">
+        <div class="score-fill" style="width:{{ row.final_score }}%"></div>
+      </div>
+
+      <!-- Sub-score breakdown -->
+      <div class="mini-scores">
+        <div class="mini-score-item">
+          <div class="mini-score-label">Communication</div>
+          <div class="mini-score-val">{{ row.communication_score|round(1) }}</div>
+          <div class="mini-score-max">/35</div>
+        </div>
+        <div class="mini-score-item">
+          <div class="mini-score-label">Records</div>
+          <div class="mini-score-val">{{ row.records_score|round(1) }}</div>
+          <div class="mini-score-max">/40</div>
+        </div>
+        <div class="mini-score-item">
+          <div class="mini-score-label">Legal</div>
+          <div class="mini-score-val">{{ row.legal_score|round(1) }}</div>
+          <div class="mini-score-max">/25</div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stat-row"><span class="stat-label">📞 Calls</span><span class="stat-value">{{ row.total_calls }} ({{ row.call_minutes|round(0)|int }} min)</span></div>
+      <div class="stat-row"><span class="stat-label">📠 Faxes</span><span class="stat-value">{{ row.total_faxes }} ({{ row.fax_minutes|round(0)|int }} min)</span></div>
+      <div class="stat-row"><span class="stat-label">📁 Records Received</span><span class="stat-value">{{ row.records_received }}</span></div>
+      <div class="stat-row"><span class="stat-label">📋 Expected</span><span class="stat-value">{{ row.expected_records }}</span></div>
+      <div class="stat-row"><span class="stat-label">⚖️ E-Files</span><span class="stat-value">{{ row.summons_efile }}</span></div>
+      <div class="stat-row"><span class="stat-label">✅ Served</span><span class="stat-value">{{ row.summons_served }}</span></div>
+      <div class="stat-row"><span class="stat-label">📂 Cases (Records)</span><span class="stat-value">{{ row.cases_for_records }}</span></div>
+      <div class="stat-row"><span class="stat-label">🏥 Facilities</span><span class="stat-value">{{ row.facilities_total }}</span></div>
+      <div class="stat-row"><span class="stat-label">📜 Cases (Summons)</span><span class="stat-value">{{ row.cases_for_summons }}</span></div>
+
+      {% if row.employee in insights %}
+      <div class="insight-box">
+        <strong style="color:#4f46e5;font-size:.75rem">📊 INSIGHT</strong><br>
+        {{ insights[row.employee]|safe }}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
 </div>
 
-<hr>
+<!-- ─── Detailed Table ────────────────────────────────── -->
+<div class="section-title fade-in">📋 Detailed Performance Table</div>
 
-<!-- ================= DETAILED TABLE ================= -->
-
-<h4 class="mb-3">Detailed Performance Table</h4>
-
-<div class="table-responsive">
-<table class="table table-bordered table-hover text-center align-middle">
-    <thead class="table-dark">
-        <tr>
+<div class="card mb-4 fade-in">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table perf-table mb-0">
+        <thead>
+          <tr>
             <th>Rank</th>
             <th>Employee</th>
-            <th>Total Calls</th>
-            <th>Call Minutes</th>
-            <th>Total Faxes</th>
-            <th>Fax Minutes</th>
-            <th>Records Received</th>
-            <th>Expected Records</th>
-            <th>E-File Count</th>
-            <th>Served Count</th>
-            <th>Communication Score</th>
-            <th>Records Score</th>
-            <th>Legal Score</th>
-            <th>Final Score</th>
+            <th>Calls</th>
+            <th>Call Min</th>
+            <th>Faxes</th>
+            <th>Fax Min</th>
+            <th>Records Rcvd</th>
+            <th>Expected</th>
+            <th class="new-col" title="Cases assigned to request medical records">Cases<br>(Records) ★</th>
+            <th class="new-col" title="Total facilities across all record cases">Facilities<br>Total ★</th>
+            <th class="new-col" title="Cases assigned to send summons">Cases<br>(Summons) ★</th>
+            <th>E-Files</th>
+            <th>Served</th>
+            <th>Comm<br>/35</th>
+            <th>Records<br>/40</th>
+            <th>Legal<br>/25</th>
+            <th>Score<br>/100</th>
             <th>Grade</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for row in data %}
-        <tr>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in data %}
+          <tr>
             <td><strong>{{ row.Rank }}</strong></td>
             <td><strong>{{ row.employee }}</strong></td>
             <td>{{ row.total_calls }}</td>
@@ -204,6 +459,9 @@
             <td>{{ row.fax_minutes|round(1) }}</td>
             <td>{{ row.records_received }}</td>
             <td>{{ row.expected_records }}</td>
+            <td class="new-col fw-semibold">{{ row.cases_for_records }}</td>
+            <td class="new-col fw-semibold">{{ row.facilities_total }}</td>
+            <td class="new-col fw-semibold">{{ row.cases_for_summons }}</td>
             <td>{{ row.summons_efile }}</td>
             <td>{{ row.summons_served }}</td>
             <td>{{ row.communication_score|round(1) }}</td>
@@ -211,131 +469,227 @@
             <td>{{ row.legal_score|round(1) }}</td>
             <td><strong>{{ row.final_score|round(2) }}</strong></td>
             <td>
-                {% if row.Grade == "A+" %}
-                    <span class="badge bg-success">{{ row.Grade }}</span>
-                {% elif row.Grade == "A" %}
-                    <span class="badge bg-primary">{{ row.Grade }}</span>
-                {% elif row.Grade == "B" %}
-                    <span class="badge bg-info">{{ row.Grade }}</span>
-                {% elif row.Grade == "C" %}
-                    <span class="badge bg-warning text-dark">{{ row.Grade }}</span>
-                {% else %}
-                    <span class="badge bg-danger">{{ row.Grade }}</span>
-                {% endif %}
+              <span class="grade-pill
+                {% if row.Grade=='A+' %}gp-aplus
+                {% elif row.Grade=='A' %}gp-a
+                {% elif row.Grade=='B' %}gp-b
+                {% elif row.Grade=='C' %}gp-c
+                {% else %}gp-d{% endif %}">
+                {{ row.Grade }}
+              </span>
             </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<p style="font-size:.72rem;color:#94a3b8;margin-top:-12px;margin-bottom:20px">★ Highlighted columns are new additions</p>
+
+<!-- ─── Charts ────────────────────────────────────────── -->
+<div class="section-title fade-in">📈 Performance Visualizations</div>
+
+<div class="row mb-4">
+  <!-- Bar chart: Final scores -->
+  <div class="col-lg-5 mb-4 fade-in stagger-1">
+    <div class="card chart-card h-100">
+      <div class="card-header-custom">🏆 Final Score (out of 100)</div>
+      <div class="card-body p-3"><canvas id="barChart"></canvas></div>
+    </div>
+  </div>
+  <!-- Pie chart: Distribution — kept compact -->
+  <div class="col-lg-3 mb-4 fade-in stagger-2">
+    <div class="card chart-card h-100">
+      <div class="card-header-custom">🍕 Score Share</div>
+      <div class="card-body p-3 d-flex align-items-center justify-content-center">
+        <div style="width:100%;max-width:220px"><canvas id="pieChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+  <!-- Donut: Grade distribution -->
+  <div class="col-lg-4 mb-4 fade-in stagger-3">
+    <div class="card chart-card h-100">
+      <div class="card-header-custom">📊 Category Breakdown</div>
+      <div class="card-body p-3"><canvas id="categoryChart"></canvas></div>
+    </div>
+  </div>
 </div>
 
-<hr>
-
-<!-- ================= CHARTS ================= -->
-
-<h4 class="mb-3">Performance Visualizations</h4>
-
-<div class="row">
-    <div class="col-lg-6 mb-4">
-        <div class="card">
-            <div class="card-header bg-dark text-white">Final Scores</div>
-            <div class="card-body">
-                <canvas id="barChart"></canvas>
-            </div>
-        </div>
+<div class="row mb-4">
+  <div class="col-lg-6 mb-4 fade-in stagger-1">
+    <div class="card chart-card">
+      <div class="card-header-custom">☎️ Communication: Calls vs Fax Minutes</div>
+      <div class="card-body p-3"><canvas id="commChart"></canvas></div>
     </div>
-    <div class="col-lg-6 mb-4">
-        <div class="card">
-            <div class="card-header bg-dark text-white">Score Distribution</div>
-            <div class="card-body">
-                <canvas id="pieChart"></canvas>
-            </div>
-        </div>
+  </div>
+  <div class="col-lg-6 mb-4 fade-in stagger-2">
+    <div class="card chart-card">
+      <div class="card-header-custom">📁 Records: Received vs Expected</div>
+      <div class="card-body p-3"><canvas id="recChart"></canvas></div>
     </div>
-</div>
-
-<div class="row">
-    <div class="col-lg-12 mb-4">
-        <div class="card">
-            <div class="card-header bg-dark text-white">Score Breakdown by Category</div>
-            <div class="card-body">
-                <canvas id="categoryChart"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-const labels = [{% for row in data %}"{{row.employee}}",{% endfor %}];
-const finalScores = [{% for row in data %}{{row.final_score}},{% endfor %}];
-const commScores = [{% for row in data %}{{row.communication_score}},{% endfor %}];
-const recScores = [{% for row in data %}{{row.records_score}},{% endfor %}];
-const legalScores = [{% for row in data %}{{row.legal_score}},{% endfor %}];
-
-// Bar Chart - Final Scores
-new Chart(document.getElementById("barChart"), {
-    type: "bar",
-    data: {
-        labels: labels,
-        datasets: [{
-            label: "Final Score",
-            data: finalScores,
-            backgroundColor: ["#667eea", "#764ba2", "#43e97b", "#f5576c"],
-            borderColor: "#333",
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
-    }
-});
-
-// Pie Chart - Distribution
-new Chart(document.getElementById("pieChart"), {
-    type: "pie",
-    data: {
-        labels: labels,
-        datasets: [{
-            data: finalScores,
-            backgroundColor: ["#667eea", "#764ba2", "#43e97b", "#f5576c"],
-            borderColor: "#fff",
-            borderWidth: 2
-        }]
-    },
-    options: { responsive: true, plugins: { legend: { position: "bottom" } } }
-});
-
-// Category Breakdown
-new Chart(document.getElementById("categoryChart"), {
-    type: "bar",
-    data: {
-        labels: labels,
-        datasets: [
-            { label: "Communication", data: commScores, backgroundColor: "#667eea" },
-            { label: "Records", data: recScores, backgroundColor: "#43e97b" },
-            { label: "Legal", data: legalScores, backgroundColor: "#f5576c" }
-        ]
-    },
-    options: {
-        responsive: true,
-        plugins: { legend: { position: "top" } },
-        scales: { y: { stacked: false, beginAtZero: true } }
-    }
-});
-</script>
-
-{% else %}
-
-<div class="alert alert-info">
-    <h5>No data yet</h5>
-    <p>Upload consolidated records and call/fax logs to see performance analytics.</p>
+  </div>
 </div>
 
 {% endif %}
 
+<!-- ─── Upload History + Delete ───────────────────────── -->
+<div class="section-title fade-in mt-2">🗂️ Upload History <small class="text-muted fw-normal ms-2" style="font-size:.78rem">Delete incorrect uploads to restore previous data</small></div>
+
+<div class="card mb-5 fade-in">
+  <div class="card-body p-0">
+    {% if history %}
+    <div class="table-responsive">
+      <table class="table hist-table mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>Employee</th>
+            <th>Date</th>
+            <th>Label</th>
+            <th>Calls</th>
+            <th>Faxes</th>
+            <th>Records</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td class="text-muted">{{ h.id }}</td>
+            <td><strong>{{ h.employee }}</strong></td>
+            <td>{{ h.date }}</td>
+            <td><span style="background:#eef2ff;color:#4f46e5;padding:2px 8px;border-radius:6px;font-size:.75rem">
+              {{ h.upload_label or '—' }}</span></td>
+            <td>{{ h.total_calls }}</td>
+            <td>{{ h.total_faxes }}</td>
+            <td>{{ h.records_received }}</td>
+            <td>
+              <form method="POST" action="/delete_upload/{{ h.id }}"
+                    onsubmit="return confirm('Delete this upload entry for {{ h.employee }} ({{ h.date }})? This cannot be undone.')">
+                <button type="submit" class="btn-del">🗑️ Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4 text-center text-muted">No upload history yet.</div>
+    {% endif %}
+  </div>
 </div>
 
+</div><!-- /container -->
+
+<!-- ─── Chart.js Scripts ──────────────────────────────── -->
+{% if data %}
+<script>
+const labels      = [{% for r in data %}"{{ r.employee }}",{% endfor %}];
+const finalScores = [{% for r in data %}{{ r.final_score }},{% endfor %}];
+const commScores  = [{% for r in data %}{{ r.communication_score }},{% endfor %}];
+const recScores   = [{% for r in data %}{{ r.records_score }},{% endfor %}];
+const legalScores = [{% for r in data %}{{ r.legal_score }},{% endfor %}];
+const callMins    = [{% for r in data %}{{ r.call_minutes|round(1) }},{% endfor %}];
+const faxMins     = [{% for r in data %}{{ r.fax_minutes|round(1) }},{% endfor %}];
+const recRcvd     = [{% for r in data %}{{ r.records_received }},{% endfor %}];
+const recExp      = [{% for r in data %}{{ r.expected_records }},{% endfor %}];
+
+const COLORS = ["#667eea","#f5576c","#43e97b","#f093fb","#4facfe","#f7971e"];
+const BASE_OPTS = {
+  responsive:true,
+  animation:{duration:900,easing:'easeOutQuart'},
+  plugins:{legend:{labels:{font:{family:"Inter",size:11}}}}
+};
+
+// Bar – Final Score
+new Chart(document.getElementById("barChart"),{
+  type:"bar",
+  data:{labels,datasets:[{
+    label:"Score /100",data:finalScores,
+    backgroundColor:COLORS,borderRadius:8,borderSkipped:false
+  }]},
+  options:{...BASE_OPTS,
+    plugins:{...BASE_OPTS.plugins,legend:{display:false}},
+    scales:{y:{beginAtZero:true,max:100,
+      grid:{color:"rgba(0,0,0,.05)"},
+      ticks:{font:{size:10}}},
+      x:{grid:{display:false},ticks:{font:{size:11,weight:'600'}}}
+    }
+  }
+});
+
+// Pie – Score share (compact, no legend on chart itself)
+new Chart(document.getElementById("pieChart"),{
+  type:"doughnut",
+  data:{labels,datasets:[{data:finalScores,backgroundColor:COLORS,
+    borderWidth:3,borderColor:"#fff",hoverOffset:6}]},
+  options:{...BASE_OPTS,cutout:"55%",
+    plugins:{legend:{position:"bottom",labels:{font:{size:10},boxWidth:10,padding:8}}}
+  }
+});
+
+// Category breakdown stacked bar
+new Chart(document.getElementById("categoryChart"),{
+  type:"bar",
+  data:{labels,datasets:[
+    {label:"Comm /35",  data:commScores,  backgroundColor:"#667eea",borderRadius:4},
+    {label:"Records /40",data:recScores, backgroundColor:"#43e97b",borderRadius:4},
+    {label:"Legal /25", data:legalScores, backgroundColor:"#f5576c",borderRadius:4},
+  ]},
+  options:{...BASE_OPTS,
+    scales:{x:{stacked:true,grid:{display:false}},
+            y:{stacked:true,beginAtZero:true,max:100,
+               grid:{color:"rgba(0,0,0,.05)"}}},
+    plugins:{...BASE_OPTS.plugins,legend:{position:"bottom"}}
+  }
+});
+
+// Communication: calls vs fax minutes
+new Chart(document.getElementById("commChart"),{
+  type:"bar",
+  data:{labels,datasets:[
+    {label:"Call Minutes",data:callMins,backgroundColor:"#4facfe",borderRadius:6},
+    {label:"Fax Minutes", data:faxMins, backgroundColor:"#f093fb",borderRadius:6},
+  ]},
+  options:{...BASE_OPTS,
+    scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:"rgba(0,0,0,.05)"}}},
+    plugins:{...BASE_OPTS.plugins,legend:{position:"bottom"}}
+  }
+});
+
+// Records: received vs expected
+new Chart(document.getElementById("recChart"),{
+  type:"bar",
+  data:{labels,datasets:[
+    {label:"Received", data:recRcvd, backgroundColor:"#43e97b",borderRadius:6},
+    {label:"Expected", data:recExp,  backgroundColor:"rgba(100,116,139,.25)",borderRadius:6},
+  ]},
+  options:{...BASE_OPTS,
+    scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:"rgba(0,0,0,.05)"}}},
+    plugins:{...BASE_OPTS.plugins,legend:{position:"bottom"}}
+  }
+});
+</script>
+{% endif %}
+
+<script>
+// Show filename in upload zones
+function showName(input, divId){
+  const div = document.getElementById(divId);
+  div.textContent = input.files[0] ? "✓ " + input.files[0].name : "";
+}
+// Auto-dismiss flash messages after 6s
+setTimeout(()=>{
+  document.querySelectorAll('.flash-item').forEach(el=>{
+    el.style.transition='opacity .5s';
+    el.style.opacity='0';
+    setTimeout(()=>el.remove(),500);
+  });
+}, 6000);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
